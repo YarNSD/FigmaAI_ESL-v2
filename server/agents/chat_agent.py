@@ -191,6 +191,8 @@ async def process_chat_message(
         )
         expert_res["student_id"] = student_id
         expert_res["detected_student"] = active_student
+        expert_res.setdefault("ok", True)
+        expert_res.setdefault("tokens", {"prompt": prompt_tokens, "completion": 0, "total": prompt_tokens})
         add_to_shared_history(role="assistant", content=expert_res["reply"], source="system")
         return expert_res
 

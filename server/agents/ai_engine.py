@@ -44,10 +44,9 @@ def _clean_token_stats(text: str) -> str:
 
 # Fallback candidates if the primary model is at capacity (code 503)
 CLI_FALLBACK_MODELS = [
-    "gemini-3.8-flash-low",
     "gemini-3.8-flash-medium",
-    "gemini-3.7-flash-low",
     "gemini-3.7-flash-medium",
+    "gemini-3.8-flash-high",
     "claude-sonnet-4-6",
     None,  # Default CLI model without --model
 ]
@@ -76,27 +75,13 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
         if fb not in candidates:
             candidates.append(fb)
 
-    # Set up proxy if local proxy is active (port 2080 / 1080)
+    # Prepare environment for agy (inherit clean environment without forced SOCKS proxy unless explicitly enabled in ai config)
     env = os.environ.copy()
-    import socket
-    proxy_port = None
-    for p in [2080, 1080, 7890]:
-        try:
-            with socket.create_connection(("127.0.0.1", p), timeout=0.5):
-                proxy_port = p
-                break
-        except (socket.timeout, ConnectionRefusedError, OSError):
-            pass
-
-    if proxy_port:
-        proto = "socks5" if proxy_port == 2080 else "http"
-        proxy_url = f"{proto}://127.0.0.1:{proxy_port}"
-        env["HTTP_PROXY"] = proxy_url
-        env["HTTPS_PROXY"] = proxy_url
-        env["ALL_PROXY"] = proxy_url
-        env["all_proxy"] = proxy_url
-        env["http_proxy"] = proxy_url
-        env["https_proxy"] = proxy_url
+    ai_proxy = config.get("ai.proxy")
+    if ai_proxy and config.get("ai.proxy_enabled"):
+        env["HTTP_PROXY"] = ai_proxy
+        env["HTTPS_PROXY"] = ai_proxy
+        env["ALL_PROXY"] = ai_proxy
 
     loop = asyncio.get_event_loop()
     last_err = ""
@@ -120,7 +105,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 text=True,
                 encoding="utf-8",
                 env=env,
-                timeout=40,
+                timeout=25,
                 stdin=subprocess.DEVNULL,
                 **kwargs
             )
@@ -143,11 +128,12 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
         err_msg = (p.stderr.strip() or raw_out) or f"agy exited with code {p.returncode}"
         last_err = err_msg
 
-        # If authentication required, stop trying models
-        if "Authentication required" in err_msg or "oauth2" in err_msg.lower() or "accounts.google.com" in err_msg:
-            logger.error("Antigravity CLI requires authentication.")
+        # If authentication or account verification required, stop trying models immediately
+        if any(k in err_msg for k in ["Authentication required", "Verification Required", "oauth2", "accounts.google.com"]):
+            logger.error(f"Antigravity CLI requires authentication/verification: {err_msg}")
             raise RuntimeError(
-                "🔑 Antigravity CLI требует авторизации. Запустите в терминале 'agy' для входа через Google."
+                "🔑 Antigravity CLI требует авторизации или подтверждения Google-аккаунта (Verification Required). "
+                "Запустите в терминале 'agy' для проверки аккаунта."
             )
 
         # If location eligibility failure, stop trying other models as it's an IP restriction
@@ -159,8 +145,8 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 "либо вставьте Gemini API Key в Настройках веб-панели."
             )
 
-        # If 503 / capacity issue or verification required, try next model
-        if any(w in err_msg for w in ["503", "No capacity available", "UNAVAILABLE", "Verification Required", "rate limit", "Too Many Requests"]):
+        # If 503 / capacity issue, try next model
+        if any(w in err_msg for w in ["503", "No capacity available", "UNAVAILABLE", "rate limit", "Too Many Requests"]):
             logger.warning(f"⚠️ Модель {target_model} вернула {err_msg[:60]}... Переключаюсь на следующую модель...")
             continue
         else:
