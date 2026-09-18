@@ -33,20 +33,22 @@ def _extract_json(text: str) -> dict:
 
 
 def _clean_token_stats(text: str) -> str:
-    """Strip token tracker footer if injected by global rules."""
-    if "📊 **Расход токенов" in text:
-        return text.split("📊 **Расход токенов")[0].strip()
-    if "📊 Токены задачи:" in text:
-        return text.split("📊 Токены задачи:")[0].strip()
+    """Strip token tracker footer and system artifacts if injected by global rules."""
+    for pattern in ["📊 **Расход токенов", "📊 Токены задачи:", "📊 **Токены", "📊 Токены:"]:
+        if pattern in text:
+            text = text.split(pattern)[0]
+    # Strip trailing horizontal rules or markdown separators if left behind
+    text = re.sub(r"\n\s*[-*_]{3,}\s*$", "", text.strip())
     return text.strip()
 
 
-# Fallback candidates if the primary model is at capacity (code 503)
+# Fallback candidates prioritizing fast low-latency flash models for conversational speed
 CLI_FALLBACK_MODELS = [
+    "gemini-3.8-flash-low",
     "gemini-3.8-flash-medium",
+    "gemini-3.7-flash-low",
     "gemini-3.7-flash-medium",
     "gemini-3.8-flash-high",
-    "claude-sonnet-4-6",
     None,  # Default CLI model without --model
 ]
 
@@ -135,8 +137,11 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 "Запустите в терминале 'agy' для проверки аккаунта."
             )
 
-        # If location eligibility failure, stop trying other models as it's an IP restriction
+        # Check if it's a transient network/avatar timeout vs genuine IP country block
         if "Eligibility check failed" in err_msg:
+            if any(t in err_msg.lower() for t in ["timeout", "handshake", "connection refused", "reset by peer"]):
+                logger.warning(f"Transient network timeout during eligibility check ({err_msg[:90]}). Trying next candidate...")
+                continue
             logger.error(f"Antigravity CLI location error: {err_msg}")
             raise RuntimeError(
                 "📍 Ошибка геолокации Antigravity CLI: текущий IP-адрес не поддерживается сервисом. "
@@ -150,11 +155,11 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
     raise RuntimeError(f"Antigravity CLI error: {last_err}")
 
 
-async def generate_text(prompt: str, system_instruction: str = "") -> str:
+async def generate_text(prompt: str, system_instruction: str = "", model: str | None = None) -> str:
     """Generate text strictly using local Antigravity CLI (100% on-device)."""
-    model = config.gemini_model()
+    selected_model = model or config.gemini_model()
     full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
-    return await _run_antigravity_cli(full_prompt, model=model)
+    return await _run_antigravity_cli(full_prompt, model=selected_model)
 
 
 async def generate_json(prompt: str, system_instruction: str = "") -> dict:

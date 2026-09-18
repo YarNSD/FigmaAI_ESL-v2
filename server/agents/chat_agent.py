@@ -28,57 +28,63 @@ except Exception:
 logger = logging.getLogger("chat_agent")
 
 
-# ── Shared Server Conversation History ───────────────────────────────────────
+# ── Per-User & Shared Conversation History ───────────────────────────────────
 _SHARED_CHAT_HISTORY: List[Dict[str, Any]] = []
+_USER_CHAT_HISTORIES: Dict[str, List[Dict[str, Any]]] = {}
 
 
-def get_shared_history(limit: int = 30) -> List[Dict[str, Any]]:
-    """Return the shared recent conversation history."""
-    return list(_SHARED_CHAT_HISTORY[-limit:])
+def get_user_history(user_key: str = "shared", limit: int = 20) -> List[Dict[str, Any]]:
+    """Return recent conversation history for a specific user/chat session."""
+    hist = _USER_CHAT_HISTORIES.get(user_key, _SHARED_CHAT_HISTORY)
+    return list(hist[-limit:])
 
 
-def add_to_shared_history(role: str, content: str, source: str = "web", **kwargs) -> None:
-    """Add a message to the shared conversation history."""
-    _SHARED_CHAT_HISTORY.append({
+def add_to_user_history(user_key: str, role: str, content: str, source: str = "telegram", **kwargs) -> None:
+    """Add a message to user-specific and shared conversation history."""
+    msg_item = {
         "role": role,
         "content": content,
         "source": source,
         "timestamp": datetime.now().strftime("%H:%M:%S"),
         **kwargs
-    })
+    }
+    if user_key not in _USER_CHAT_HISTORIES:
+        _USER_CHAT_HISTORIES[user_key] = []
+    _USER_CHAT_HISTORIES[user_key].append(msg_item)
+    if len(_USER_CHAT_HISTORIES[user_key]) > 40:
+        _USER_CHAT_HISTORIES[user_key].pop(0)
+
+    _SHARED_CHAT_HISTORY.append(msg_item)
     if len(_SHARED_CHAT_HISTORY) > 50:
         _SHARED_CHAT_HISTORY.pop(0)
 
 
-def clear_shared_history() -> None:
-    """Clear all shared history."""
-    _SHARED_CHAT_HISTORY.clear()
+def clear_user_history(user_key: str = "shared") -> None:
+    """Clear history for a specific user session."""
+    if user_key in _USER_CHAT_HISTORIES:
+        _USER_CHAT_HISTORIES[user_key].clear()
+    if user_key == "shared":
+        _SHARED_CHAT_HISTORY.clear()
 
 
-CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницательный персональный ИИ-собеседник и ассистент преподавателя в проекте FigmaAI.
+CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницательный персональный ИИ-собеседник и напарник преподавателя в проекте FigmaAI.
 Ты общаешься с пользователем в Telegram и веб-интерфейсе.
 
 ПРИНЦИПЫ ОБЩЕНИЯ:
-1. 🗣️ Естественный живой диалог: Общайся как умный, внимательный напарник-человек (как модель в диалоге Antigravity/ChatGPT). Забудь шаблонные канцелярские фразы и роботизированные формулировки. Говори живо, тепло, по существу.
-2. 🌐 Абсолютная свобода тем: Пользователь может общаться с тобой на ЛЮБЫЕ ТЕМЫ (идеи, программирование, жизнь, настроение, шутки, философия или просто мысли). НИКОГДА не навязывай тему уроков и не своди разговор к занятиям, если пользователь просто болтает или обсуждает посторонние вещи!
-3. 🎯 Понимание сути и желаний: Слушай пользователя, улавливай его истинные намерения и мысли в процессе беседы. Если нужно — поддержи разговор, задай интересный вопрос по теме беседы или поразмышляй вместе с ним.
-4. 🚫 Никаких дежурных анкет: Если пользователь не попросил прямо составить учебный материал под уровень, НИКОГДА не приставай с вопросами «Какой уровень: A1, A2, B1?». Не устраивай анкетирование!
-5. 🛠️ Возможности нашего проекта FigmaAI: Ты помнишь, что подключён к проекту и доске Figma / FigJam:
-   - Интерактивные блоки: квизы с самопроверкой (quiz_photo), открывашки-шторки (flip_cards), таблицы слов с переводом (vocabulary_table), карточки для беседы (speaking_cards), задания с пропусками (fill_blanks), карточки со словами (flashcards), комплексные уроки (bloom_lesson, full_lesson).
-   - Управление доской: авто-оглавление (refresh_toc), штамп времени урока (timestamp), переключение досок.
-   - Профили учеников: запоминание фактов, интересов, сильных и слабых сторон.
-6. 🚀 Действия с проектом:
-   - Если в процессе живой беседы вы приходите к мысли что-то создать, или пользователь просит: «нарисуй это на доске», «сделай квиз по этой идее», «закинь карточки» — ставь "ready_to_build": true и сформируй "lesson_plan" (title, topic, level, blocks: ["quiz_photo"]). В поле "reply" кратко опиши состав и напиши: «План готов! Напиши "Делай", и я нарисую его на доске». СТРОГО ЗАПРЕЩЕНО писать, что ты «уже создаешь / рисуешь / закидываешь на доску» или выдумывать статус процесса («дорисовываю картинки»), пока создание не запущено!
-   - Если это обычный разговор, совет, обмен мыслями или обсуждение — "ready_to_build": false и "lesson_plan": null.
-7. 🔘 Подсказки (suggested_replies):
-   - Добавляй 1–2 варианта подсказок ТОЛЬКО когда они органично продолжают мысль (например, идеи для обсуждения или кнопка действия).
-   - Если это обычная беседа или открытый вопрос — возвращай пустой массив: []! Не спамь кнопками!
+1. 🗣️ Естественный живой диалог: Общайся как умный, эмпатичный, интересный человек (настоящий напарник). Говори легко, свободно, с юмором и поддержкой. Никаких шаблонных канцелярских отписок и роботских фраз!
+2. 🌐 Свобода любых тем: Пользователь может говорить с тобой О ЧЁМ УГОДНО — о настроении, о том как прошёл день, о фильмах, жизни, методике, философии или просто перекинуться парой фраз. НИКОГДА не навязывай уроки, если человек просто общается!
+3. 🚫 Никаких дежурных анкет: Если тебя не просят прямо составить тест/упражнение, НИКОГДА не приставай с вопросами «Какой уровень CEFR: A1, A2, B1?». Будь интересным собеседником, а не бюрократом.
+4. 🛠️ Проект FigmaAI (твоя суперсила): Ты умеешь рисовать на доске Figma интерактивные квизы с самопроверкой, карточки со словами, разминки Speaking, таблицы слов с переводом и открывашки.
+5. 🚀 Создание на холсте:
+   - Если пользователь прямо говорит «нарисуй на доске...», «сделай квиз на доске...» или в процессе обсуждения вы решили перенести упражнение на холст — установи "ready_to_build": true и заполни "lesson_plan".
+   - В обычном разговоре всегда держи "ready_to_build": false и "lesson_plan": null.
+6. 🔘 Подсказки: Не спамь кнопками! Если это открытая беседа — возвращай пустой массив "suggested_replies": [].
 
-ФОРМАТ СТРОГО JSON:
+ФОРМАТ ОТВЕТА (желательно JSON, но если ты ответишь живым текстом, система тебя поймет):
 {
-  "reply": "Твой живой, естественный и содержательный ответ",
+  "reply": "Твой естественный, живой ответ",
   "suggested_replies": [],
-  "extracted_student_facts": {"name": null, "age": null, "level": null, "interests": null, "weaknesses": null, "strengths": null},
+  "extracted_student_facts": null,
   "ready_to_build": false,
   "lesson_plan": null
 }"""
@@ -87,6 +93,7 @@ CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницатель�
 async def process_chat_message(
     message: str,
     student_id: Optional[str] = None,
+    user_key: str = "shared",
     history: Optional[List[Dict[str, str]]] = None,
     selection: Optional[Dict[str, Any]] = None,
     image_base64: Optional[str] = None,
@@ -94,13 +101,13 @@ async def process_chat_message(
 ) -> Dict[str, Any]:
     """
     Process a message from the teacher, update student profile if facts are mentioned,
-    analyze any attached textbook or canvas images, and return an interactive reply with suggested chips.
+    analyze any attached textbook or canvas images, and return an interactive reply.
     """
     if history is None:
-        history = get_shared_history(limit=8)
+        history = get_user_history(user_key, limit=10)
 
-    # Record incoming user message in shared history
-    add_to_shared_history(role="user", content=message, source=source)
+    # Record incoming user message
+    add_to_user_history(user_key=user_key, role="user", content=message, source=source)
 
     student_context = student_agent.format_student_prompt_context(student_id) if student_id else ""
     active_student = student_agent.get_student(student_id) if student_id else None
@@ -120,7 +127,7 @@ async def process_chat_message(
     if student_context:
         context_parts.append(student_context)
     else:
-        context_parts.append("Ученик на данный момент НЕ выбран. Преподаватель может вести свободный диалог о проекте, методике или конкретном ученике.")
+        context_parts.append("Ученик на данный момент НЕ выбран. Преподаватель может вести свободный диалог о проекте, методике или на любые отвлеченные темы.")
 
     if selection and selection.get("count", 0) > 0:
         context_parts.append(f"На холсте выделен элемент: {selection.get('name', 'Элемент')} (isImage={selection.get('isImage')})")
@@ -134,13 +141,12 @@ async def process_chat_message(
             f"🖼️ К сообщению прикреплено изображение: «{v_title}». "
             f"Описание/сюжет: {v_desc}. "
             f"Распознано заданий/предложений: {len(v_sents)}. "
-            f"Рекомендованный интерактивный блок: {v_type}. "
-            f"ПРАВИЛО: Если на картинке есть готовое упражнение из учебника — используй его 1-в-1 без выдумывания лишнего!"
+            f"Рекомендованный интерактивный блок: {v_type}."
         )
 
-    # History summary (last 6 turns)
+    # History summary (last 8 turns)
     history_lines = []
-    for turn in history[-6:]:
+    for turn in history[-8:]:
         role = "Учитель" if turn.get("role") == "user" else "Ассистент"
         history_lines.append(f"{role}: {turn.get('content', '')}")
 
@@ -154,35 +160,20 @@ async def process_chat_message(
 НОВОЕ СООБЩЕНИЕ УЧИТЕЛЯ:
 "{message}"
 
-Ответь строго в формате JSON, как указано в системных инструкциях.
+Ответь свободно и живо.
 """
-
-    target_desc = active_student.get("name", "ученика") if active_student else "запроса"
-    agent_logger.emit_log(
-        stage="thinking",
-        icon="🧑‍🏫",
-        title="Педагогический анализ",
-        message=f"Анализирует запрос ({target_desc}): «{message[:60]}»",
-        agent="🧑‍🏫 Педагогический агент"
-    )
 
     prompt_tokens = count_tokens(CHAT_SYSTEM_PROMPT) + count_tokens(user_prompt)
     completion_tokens = 0
     try:
         raw_response = await ai_engine.generate_text(
             prompt=user_prompt,
-            system_instruction=CHAT_SYSTEM_PROMPT
+            system_instruction=CHAT_SYSTEM_PROMPT,
+            model="gemini-3.8-flash-low"
         )
         completion_tokens = count_tokens(raw_response)
     except Exception as e:
-        logger.info(f"Chat AI engine offline or unconfigured ({e}). Utilizing pedagogical expert knowledge engine...")
-        agent_logger.emit_log(
-            stage="thinking",
-            icon="🧑‍🏫",
-            title="Педагогический эксперт",
-            message="Формирую развернутый методический ответ и идеи материалов",
-            agent="🧑‍🏫 Педагогический агент"
-        )
+        logger.info(f"Chat AI engine failed ({e}). Utilizing pedagogical partner fallback...")
         from server.agents import pedagogical_knowledge
         expert_res = pedagogical_knowledge.analyze_and_respond(
             message=message,
@@ -193,10 +184,10 @@ async def process_chat_message(
         expert_res["detected_student"] = active_student
         expert_res.setdefault("ok", True)
         expert_res.setdefault("tokens", {"prompt": prompt_tokens, "completion": 0, "total": prompt_tokens})
-        add_to_shared_history(role="assistant", content=expert_res["reply"], source="system")
+        add_to_user_history(user_key=user_key, role="assistant", content=expert_res["reply"], source="system")
         return expert_res
 
-    # Parse JSON
+    # Parse JSON or fallback gracefully to raw text as reply
     parsed = None
     try:
         clean_json = raw_response.strip()
@@ -209,14 +200,21 @@ async def process_chat_message(
         e_idx = clean_json.rfind("}")
         if s_idx != -1 and e_idx != -1:
             clean_json = clean_json[s_idx:e_idx + 1]
+            parsed = json.loads(clean_json)
+    except Exception:
+        parsed = None
 
-        parsed = json.loads(clean_json)
-    except Exception as e:
-        logger.warning(f"Failed to parse LLM chat JSON: {e}. Raw: {raw_response[:200]}")
+    # If not JSON, use the generated text directly — NEVER substitute with canned template!
+    if not parsed or not isinstance(parsed, dict) or "reply" not in parsed:
+        cleaned_text = raw_response.strip()
+        # Clean any leftover markdown blocks or tokens
+        cleaned_text = re.sub(r"^```(?:json)?\s*", "", cleaned_text)
+        cleaned_text = re.sub(r"\s*```$", "", cleaned_text).strip()
         parsed = {
-            "reply": raw_response if len(raw_response) < 400 else "Отлично! Давайте уточним детали для урока или обсудим проект.",
-            "suggested_replies": ["Продолжить", "Сделать квиз", "Разминка Speaking"],
-            "ready_to_build": False
+            "reply": cleaned_text or "Я на связи! Чем могу помочь?",
+            "suggested_replies": [],
+            "ready_to_build": False,
+            "lesson_plan": None
         }
 
     # Extract student facts and update database if found
@@ -275,8 +273,8 @@ async def process_chat_message(
 
     reply_text = parsed.get("reply", "Готов помочь с материалами для урока!")
 
-    # Record assistant reply in shared history
-    add_to_shared_history(role="assistant", content=reply_text, source=source)
+    # Record assistant reply in user and shared history
+    add_to_user_history(user_key=user_key, role="assistant", content=reply_text, source=source)
 
     return {
         "reply": reply_text,

@@ -500,11 +500,52 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear conversational history across Web UI and Telegram."""
     if not await check_auth(update):
         return
-    chat_agent.clear_shared_history()
+    uid = str(update.effective_user.id) if update.effective_user else "default"
+    chat_agent.clear_user_history(uid)
+    chat_agent.clear_user_history("shared")
     context.user_data.pop("pending_lesson_plan", None)
+    context.user_data.pop("pending_plan_time", None)
     context.user_data.pop("latest_suggestions", None)
     if update.message:
-        await update.message.reply_text("🧹 *История диалога успешно очищена!*", parse_mode="Markdown")
+        await update.message.reply_text("🧹 *История диалога и черновики планов очищены!*", parse_mode="Markdown")
+
+
+async def cmd_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show current session token usage."""
+    if not await check_auth(update):
+        return
+    sess_tokens = context.user_data.get("session_tokens", 0)
+    tok_text = (
+        f"📊 *Статистика использования токенов*\n\n"
+        f"▫️ Израсходовано в текущей сессии: *{sess_tokens:,}* токенов\n"
+        f"▫️ Вызовы ИИ выполняются на 100% локально через Google Antigravity CLI без внешних платных API."
+    )
+    if update.message:
+        await update.message.reply_text(tok_text, parse_mode="Markdown")
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show status of bridge, board, and active tasks."""
+    if not await check_auth(update):
+        return
+    _, bname = _get_active_board_info()
+    _, sname = _get_active_student_info(context)
+    is_online = bridge.is_connected()
+    conn_str = "🟢 На связи" if is_online else "🔴 Офлайн"
+    gen_str = f"⏳ В процессе: `{_active_creation_description}`" if _active_creation_description else "⚪ Ничего не генерируется"
+    plan = context.user_data.get("pending_lesson_plan")
+    plan_str = f"📝 Сохранён план: *«{plan.get('title', plan.get('topic', 'Урок'))}»*" if plan else "⚪ Нет сохранённых планов"
+
+    status_text = (
+        f"ℹ️ *Текущее состояние системы*\n\n"
+        f"📋 *Доска:* `{bname}`\n"
+        f"🔌 *Плагин Figma:* {conn_str}\n"
+        f"👤 *Ученик:* `{sname}`\n"
+        f"🎨 *Генерация:* {gen_str}\n"
+        f"{plan_str}"
+    )
+    if update.message:
+        await update.message.reply_text(status_text, parse_mode="Markdown")
 
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -611,8 +652,9 @@ async def handle_backup_zip_upload(update: Update, context: ContextTypes.DEFAULT
 
 
 async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str):
-    """Process message in dialogue mode with pedagogical reasoning, suggested chips and lesson building."""
+    """Process message in natural conversational dialogue mode with pedagogical reasoning."""
     sid, sname = _get_active_student_info(context)
+    uid = str(update.effective_user.id) if update.effective_user else "default"
 
     # Show typing indicator
     if update.effective_chat:
@@ -625,13 +667,14 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
         res = await chat_agent.process_chat_message(
             message=user_text,
             student_id=sid,
+            user_key=uid,
             source="telegram"
         )
     except Exception as e:
         logger.error(f"Chat agent error in telegram: {e}", exc_info=True)
         res = {
-            "reply": f"Произошла ошибка при обработке: {e}. Попробуйте еще раз или выберите действие в меню.",
-            "suggested_replies": ["🎯 Создать задание", "👤 Выбрать ученика", "📋 Меню"],
+            "reply": f"Произошла ошибка при обработке: {e}. Попробуйте ещё раз.",
+            "suggested_replies": [],
             "ready_to_build": False
         }
 
@@ -640,34 +683,16 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
     if detected_sid and not sid:
         context.user_data["selected_student_id"] = detected_sid
 
-    reply_text = res.get("reply", "Готов помочь с подготовкой урока!")
+    reply_text = res.get("reply", "Я на связи! Чем могу помочь?")
     lesson_plan = res.get("lesson_plan")
     ready_to_build = res.get("ready_to_build", False)
-    suggestions = res.get("suggested_replies", [])
 
-    # Compact token stats tracking (Variant 1 requested by user)
+    # Track session tokens silently in user_data (no visual spam in chat messages)
     tok_info = res.get("tokens") or {}
     req_tokens = tok_info.get("total", 0)
     if not req_tokens:
-        req_tokens = max(100, int((len(user_text) + len(reply_text)) / 3) + 200)
-
-    curr_session_tokens = context.user_data.get("session_tokens", 0) + req_tokens
-    context.user_data["session_tokens"] = curr_session_tokens
-
-    def _fmt_tok(n: int) -> str:
-        if n >= 1000:
-            return f"{n/1000:.1f}k".replace(".0k", "k")
-        return str(n)
-
-    token_footer = (
-        f"\n\n📊 *Токены:*\n"
-        f"▫️ Запрос: {_fmt_tok(req_tokens)}\n"
-        f"▫️ Сессия: {_fmt_tok(curr_session_tokens)}"
-    )
-    final_reply_text = reply_text + token_footer
-
-    context.user_data["pending_lesson_plan"] = lesson_plan
-    context.user_data["latest_suggestions"] = suggestions
+        req_tokens = max(50, int((len(user_text) + len(reply_text)) / 3) + 100)
+    context.user_data["session_tokens"] = context.user_data.get("session_tokens", 0) + req_tokens
 
     # If ready_to_build and the user explicitly ordered creation in words, start building immediately!
     if ready_to_build and lesson_plan and is_direct_create_command(user_text):
@@ -682,65 +707,45 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
         comments = lesson_plan.get("teacher_comments", "")
         cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
         context.user_data.pop("pending_lesson_plan", None)
+        context.user_data.pop("pending_plan_time", None)
 
         target_msg = update.message or (update.callback_query.message if update.callback_query else None)
         if target_msg:
             try:
                 await target_msg.reply_text(
-                    f"{reply_text}\n\n🚀 *План готов! Начинаю генерацию и вёрстку на доске...*" + token_footer,
+                    f"{reply_text}\n\n🚀 *План согласован! Начинаю генерацию и вёрстку на доске...*",
                     parse_mode="Markdown"
                 )
             except Exception:
-                await target_msg.reply_text(f"{reply_text}\n\n🚀 План готов! Начинаю генерацию и вёрстку на доске...")
+                await target_msg.reply_text(f"{reply_text}\n\n🚀 План согласован! Начинаю генерацию и вёрстку на доске...")
 
         await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
         return
 
-    # If it was an exploratory discussion, tell the teacher clearly that they can just say "Делай"
-    if ready_to_build and lesson_plan:
-        final_reply_text = (
-            reply_text +
-            "\n\n👉 *Напишите «Делай»* (или нажмите кнопку ниже), чтобы я нарисовал этот блок на доске!" +
-            token_footer
-        )
-
+    final_reply_text = reply_text
     buttons = []
 
-    # 1. Action button if ready to build
-    has_draw_button = False
+    # If lesson plan is ready to build, attach actionable 1-click button and note
     if ready_to_build and lesson_plan:
+        context.user_data["pending_lesson_plan"] = lesson_plan
+        context.user_data["pending_plan_time"] = time.time()
         topic = lesson_plan.get("topic", "Урок")
         buttons.append([InlineKeyboardButton(f"🚀 Нарисовать «{topic[:22]}» на доске", callback_data="chat_action:draw_plan")])
-        has_draw_button = True
+        final_reply_text += "\n\n👉 *Напишите «Делай»* (или нажмите кнопку ниже), чтобы нарисовать блок на доске!"
+    else:
+        # Clear stale plans if conversation naturally moved to another subject
+        if context.user_data.get("pending_plan_time") and (time.time() - context.user_data["pending_plan_time"] > 300):
+            context.user_data.pop("pending_lesson_plan", None)
+            context.user_data.pop("pending_plan_time", None)
 
-    # 2. Suggested reply chips (filter out duplicate drawing and menu buttons)
-    cleaned_suggestions = []
-    for sugg in suggestions:
-        s_low = sugg.lower().strip()
-        # Skip menu in chips because dedicated menu button is always added at the bottom
-        if "меню" in s_low or "menu" in s_low:
-            continue
-        # Skip drawing confirmations in chips if we already have the primary action button
-        if has_draw_button and any(k in s_low for k in ["рисуй", "нарисовать", "создавай", "делай"]):
-            continue
-        cleaned_suggestions.append(sugg)
+    keyboard = InlineKeyboardMarkup(buttons) if buttons else None
 
-    for idx, sugg in enumerate(cleaned_suggestions[:3]):
-        label = sugg if re.match(r'^[^\w\s]', sugg) else f"💡 {sugg}"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"chat_suggest:{idx}")])
-
-    # 3. Main menu shortcut (single, guaranteed)
-    buttons.append([InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")])
-
-    keyboard = InlineKeyboardMarkup(buttons)
-
-    # Send response safely
+    # Send natural response safely
     target_msg = update.message or (update.callback_query.message if update.callback_query else None)
     if target_msg:
         try:
             await target_msg.reply_text(final_reply_text, reply_markup=keyboard, parse_mode="Markdown")
         except Exception:
-            # Fallback to plain text if markdown parse fails
             await target_msg.reply_text(final_reply_text, reply_markup=keyboard)
 
 
@@ -749,15 +754,13 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
 def is_confirmation_phrase(text: str) -> bool:
     """
     Check if teacher's message confirms drawing/building the pending lesson plan.
-    Supports single-word and multi-word affirmations ('да', 'хорошо', 'да, хорошо', 'давай делай', 'супер', '+', etc.)
-    with strict exclusion of negative/cancellation tokens.
+    Requires explicit affirmative intent targeted at building.
     """
     cleaned = re.sub(r"[!.,?+\-_/]+", " ", text.strip().lower()).strip()
     words = cleaned.split()
     if not words:
         return text.strip() in ("+", "++", "+++")
 
-    # Rejection or cancellation tokens take precedence
     negative_words = {
         "нет", "не", "подожди", "стоп", "отмена", "отмени", "погоди",
         "переделай", "поменяй", "измени", "убери", "исправь", "другое", "не надо", "не то"
@@ -765,99 +768,88 @@ def is_confirmation_phrase(text: str) -> bool:
     if any(w in negative_words for w in words):
         return False
 
-    affirmative_words = {
-        "да", "yes", "ага", "угу", "ок", "ok", "делай", "давай", "рисуй", "создавай",
-        "погнали", "поехали", "го", "go", "хорошо", "отлично", "супер", "класс",
-        "подходит", "согласен", "готов", "конечно", "добро", "принято", "действуй",
-        "запускай", "стартуй", "начинай", "вперед", "вперёд", "пойдет", "пойдёт",
-        "плюс", "круто", "замечательно", "прекрасно", "ладно", "делайте", "давайте",
-        "рисуйте", "создавайте", "красота"
-    }
+    # If conversational phrase about discussing or talking, not confirmation to draw
+    if any(w in ("поговорим", "обсудим", "расскажи", "поболтаем", "спросить", "думаешь") for w in words):
+        return False
 
-    # 1. Single affirmative word ("да", "ок", "хорошо", "делай", "давай", etc.)
-    if len(words) == 1 and words[0] in affirmative_words:
+    action_affirmatives = {
+        "делай", "давай", "рисуй", "создавай", "погнали", "поехали", "го", "go",
+        "запускай", "стартуй", "начинай", "делайте", "давайте", "рисуйте", "создавайте", "действуй"
+    }
+    # Direct action verb ("делай", "давай", "рисуй", "погнали")
+    if any(w in action_affirmatives for w in words):
         return True
 
-    # 2. Short phrases (<= 5 words) containing affirmative word or approval pattern
-    # e.g. "да, хорошо", "хорошо, делай", "да, давай так", "да, всё ок", "мне нравится", "отличный план"
-    if len(words) <= 5:
-        if any(w in affirmative_words for w in words):
-            return True
-        if "нравится" in words or ("отличный" in words and "план" in words):
-            return True
+    # Short exact affirmations: "да", "ок", "хорошо", "супер", "отлично", "+"
+    if len(words) <= 3 and any(w in ("да", "ок", "ok", "хорошо", "супер", "отлично", "согласен", "принято", "добро", "плюс") for w in words):
+        return True
 
     return False
 
 
 def is_direct_create_command(text: str) -> bool:
     """
-    Check if teacher explicitly commands to create/draw a specific ESL block using natural language.
-    Cleans leading conversational pleasantries ('привет', 'слушай', 'пожалуйста', etc.)
-    and detects both prefix commands and action verbs + block markers.
+    Check if teacher explicitly commands to create/draw a specific ESL block on the Figma canvas.
+    Distinguishes direct imperative commands from general questions or conversational discussion.
     """
     lower = text.lower().strip()
-    # Strip greetings and common pleasantries
+
+    # If it's a question or discussion ("как сделать...", "почему...", "стоит ли...", "подскажи..."), it is NOT a direct create command!
+    discussion_prefixes = (
+        "как", "почему", "зачем", "стоит ли", "можно ли", "что если",
+        "подскажи", "посоветуй", "помоги", "расскажи", "объясни", "что думаешь", "как думаешь"
+    )
+    if any(lower.startswith(p) for p in discussion_prefixes):
+        return False
+    if lower.endswith("?") and not any(lower.startswith(p) for p in ("нарисуй", "создай", "сделай на доске")):
+        return False
+
     cleaned = re.sub(
-        r"^(?:привет|здравствуй(?:те)?|добрый\s+(?:день|вечер|утро)|хай|хей|hello|hi|слушай(?:те)?|пожалуйста|бот|эй|давай|можешь(?:\s+пожалуйста)?)\s*[,!.:-]*\s*",
+        r"^(?:привет|здравствуй(?:те)?|добрый\s+(?:день|вечер|утро)|хай|хей|hello|hi|слушай(?:те)?|пожалуйста|бот|эй|можешь(?:\s+пожалуйста)?)\s*[,!.:-]*\s*",
         "",
         lower
     ).strip()
 
-    create_prefixes = (
+    # Explicit canvas drawing prefixes
+    board_prefixes = (
         "/draw_now", "/create_now",
-        "нарисуй на доске", "нарисуй", "нарисовать",
-        "создай на доске", "создай", "создать",
-        "сделай на доске", "сделай", "сделать",
-        "сгенерируй на доске", "сгенерируй", "сгенерировать",
-        "закинь на доске", "закинь на доску", "закинь",
+        "нарисуй на доске", "нарисуй на холсте", "нарисуй",
+        "создай на доске", "создай на холсте", "создай",
+        "сделай на доске", "сделай на холсте",
+        "сгенерируй на доске", "сгенерируй на холсте", "сгенерируй",
+        "закинь на доску", "закинь на холст", "закинь",
         "построй на доске", "построй",
-        "накидай быстренько", "накидай", "накидать",
-        "накидал быстренько", "накидал", "накидали",
-        "подготовь на доске", "подготовь", "подготовить",
-        "собери урок", "собери занятие", "собери"
+        "накидай на доску", "накидай быстренько", "накидай",
+        "подготовь на доске", "собери на доске"
     )
     block_markers = (
         "квиз", "quiz", "тест", "открываш", "peekaboo", "flip", "карточк", "флешкарт",
         "flashcard", "словар", "vocab", "слов", "пропуск", "fill", "разминк", "warmup",
-        "speaking", "говор", "урок", "заняти", "lesson", "блум", "bloom", "вопрос", "задани"
+        "speaking", "говор", "урок", "заняти", "lesson", "блум", "bloom"
     )
 
-    # Check prefix on raw lower text or stripped text
-    if any(lower.startswith(p) or cleaned.startswith(p) for p in create_prefixes):
+    if any(lower.startswith(p) or cleaned.startswith(p) for p in board_prefixes):
         if any(marker in lower for marker in block_markers):
             return True
-
-    # Check if text contains a create verb and a block marker in a focused command
-    create_verbs = [
-        "нарисуй", "создай", "сделай", "сгенерируй", "закинь", "построй", "накидай", "собери", "подготовь"
-    ]
-    has_create_verb = any(re.search(rf"\b{v}\w*\b", lower) for v in create_verbs)
-    has_block_marker = any(marker in lower for marker in block_markers)
-    if has_create_verb and has_block_marker and len(lower.split()) <= 30:
-        return True
 
     return False
 
 
 def is_status_query(text: str) -> bool:
-    """Check if teacher is asking about current creation status or progress."""
+    """
+    Check if teacher is specifically querying ongoing Figma canvas generation progress.
+    Generic questions like "Что делаешь?", "Чем занимаешься?" are NOT status queries!
+    """
     lower = text.lower().strip()
-    status_patterns = [
-        "ты точно делаешь", "ты делаешь", "делаешь ли", "на каком этапе", "на каком ты этапе",
-        "когда сделаешь", "когда закончишь", "сообщи о том,что закончил", "сообщи когда закончил",
-        "долго еще", "долго ещё", "статус генерации", "статус задания", "делается ли",
-        "ты начал", "процесс идет", "процесс идёт", "уже готово", "готово ли",
-        "ты уже делаешь", "уже делаешь", "ты создаешь", "ты уже создаешь", "уже создаешь",
-        "ты рисуешь", "ты уже рисуешь", "уже рисуешь", "делаешь сейчас", "сейчас делаешь",
-        "в процессе", "ты уже начал", "уже начал", "ты делаешь задание", "ты уже делаешь задание"
+    specific_generation_patterns = [
+        "статус генерации", "статус создания", "статус задания",
+        "какой этап генерации", "на каком этапе генерация", "на каком этапе создание",
+        "долго еще делать задание", "долго ещё делать задание", "долго еще генерировать",
+        "ты уже закончил создание", "закончил ли создание", "закончил ли рисовать на доске",
+        "что сейчас генерируется", "что сейчас создается на доске", "что сейчас создаётся на доске",
+        "делается ли задание", "процесс создания идет", "процесс генерации идет"
     ]
-    if any(p in lower for p in status_patterns):
-        return True
-
-    if re.search(r"\b(?:ты\s+)?(?:уже\s+|сейчас\s+)?(?:делаешь|рисуешь|создаешь|генерируешь|начал|занимаешься)\b", lower):
-        return True
-
-    return False
+    return any(p in lower for p in specific_generation_patterns)
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -903,7 +895,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await send_backup_document(update, context)
         return
 
-    # 2.3 Status query check (truthful answer, never hallucinate!)
+    # 2.3 Status query check (strictly about canvas generation)
     if is_status_query(text):
         if _active_creation_description:
             await update.message.reply_text(
@@ -929,15 +921,19 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         else:
             await update.message.reply_text(
                 "ℹ️ *Сейчас на доске ничего не генерируется.*\n\n"
-                "Напишите словами, какое задание создать (например: *«сделай квиз про профессии для 8 лет»*), и я сразу приступлю!",
+                "Вы можете в любой момент дать команду нарисовать блок (например: *«нарисуй квиз про животных»*) или просто пообщаться со мной!",
                 parse_mode="Markdown"
             )
             return
 
-    # 2.4 Check if teacher confirms pending lesson plan with natural speech ("делай", "давай", "рисуй", "ок", "погнали")
+    # 2.4 Check if teacher confirms pending lesson plan
     pending_plan = context.user_data.get("pending_lesson_plan")
-    if pending_plan and is_confirmation_phrase(text):
+    plan_time = context.user_data.get("pending_plan_time", 0)
+    is_fresh_plan = (time.time() - plan_time) < 300  # Valid for 5 minutes
+
+    if pending_plan and is_fresh_plan and is_confirmation_phrase(text):
         context.user_data.pop("pending_lesson_plan", None)
+        context.user_data.pop("pending_plan_time", None)
         topic = pending_plan.get("topic", "Урок")
         plan_title = pending_plan.get("title", f"Задание: {topic}")
         plan_level = pending_plan.get("level")
@@ -954,6 +950,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
         return
+    elif pending_plan and not is_fresh_plan:
+        # Clear expired plan
+        context.user_data.pop("pending_lesson_plan", None)
+        context.user_data.pop("pending_plan_time", None)
 
     # 2.5 Check if teacher refers to images/photos on the canvas
     is_canvas_photo_request = any(k in lower for k in [
@@ -1001,7 +1001,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await execute_creation(update, context, command=text, block_type=pending_btype)
         return
 
-    # Check for direct draw commands in words (e.g. "нарисуй квиз...", "сделай квиз...", "/draw_now ...")
+    # Check for direct draw commands in words (e.g. "нарисуй на доске квиз...", "/draw_now ...")
     if is_direct_create_command(text):
         await execute_creation(update, context, command=text)
         return
@@ -1313,6 +1313,8 @@ async def _run_bot_coroutine(token: str, proxy_url: Optional[str] = None):
 
         app.add_handler(CommandHandler(["start", "menu", "help"], cmd_start))
         app.add_handler(CommandHandler(["clear", "reset"], cmd_clear))
+        app.add_handler(CommandHandler(["status", "info"], cmd_status))
+        app.add_handler(CommandHandler(["tokens", "usage"], cmd_tokens))
         app.add_handler(CommandHandler(["feedback", "review", "debrief"], cmd_feedback))
         app.add_handler(CommandHandler(["backup"], cmd_backup))
         app.add_handler(CallbackQueryHandler(on_callback))
