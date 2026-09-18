@@ -187,6 +187,58 @@
       flex-shrink: 0;
     }
 
+    /* ── Primary Action: Navigate to TOC ───────────────────────────────────── */
+    .btn-navigate-toc {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.22) 0%, rgba(139, 92, 246, 0.18) 100%);
+      color: #f1f5f9;
+      border: 1px solid rgba(129, 140, 248, 0.45);
+      border-radius: 10px;
+      padding: 7px 10px;
+      min-height: 33px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+      width: 100%;
+      white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+
+    .btn-navigate-toc:hover {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.38) 0%, rgba(139, 92, 246, 0.32) 100%);
+      border-color: rgba(165, 180, 252, 0.8);
+      color: #ffffff;
+      box-shadow: 0 3px 10px rgba(99, 102, 241, 0.25);
+    }
+
+    .btn-navigate-toc:active {
+      transform: translateY(1px);
+    }
+
+    .btn-nav-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .btn-nav-badge {
+      background: rgba(99, 102, 241, 0.25);
+      color: #c7d2fe;
+      border: 1px solid rgba(165, 180, 252, 0.35);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 9.5px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
     /* ── Secondary Actions: TOC ───────────────────────────────────────────── */
     .toc-row {
       display: grid;
@@ -899,6 +951,18 @@
       <span id="liveClockPill" class="time-badge">--:--</span>
     </button>
 
+    <!-- Navigation Action: Jump directly to Table of Contents -->
+    <button id="goToTocBtn" class="btn-navigate-toc" title="Центрировать камеру и приблизить оглавление на холсте">
+      <div class="btn-nav-left">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#a5b4fc" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+        </svg>
+        <span>Перейти к меню</span>
+      </div>
+      <span class="btn-nav-badge">Найти 🎯</span>
+    </button>
+
     <!-- Secondary Actions: TOC -->
     <div class="toc-row">
       <button id="refreshTocBtn" class="btn-secondary" title="Просканировать доску и обновить меню навигации">
@@ -1151,6 +1215,7 @@
     const pingBtnText = document.getElementById("pingBtnText");
     const currentStatusBadge = document.getElementById("currentStatusBadge");
     const liveClockPill = document.getElementById("liveClockPill");
+    const goToTocBtn = document.getElementById("goToTocBtn");
     const refreshTocBtn = document.getElementById("refreshTocBtn");
     const refreshBtnText = document.getElementById("refreshBtnText");
     const toggleTocBtn = document.getElementById("toggleTocBtn");
@@ -2109,6 +2174,15 @@
     }
 
     // ── TOC Buttons ─────────────────────────────────────────────────────────
+    if (goToTocBtn) {
+      goToTocBtn.addEventListener("click", () => {
+        parent.postMessage({
+          pluginMessage: { type: "NAVIGATE_TO_TOC" }
+        }, "*");
+        showToast("🎯 Переход к меню...");
+      });
+    }
+
     refreshTocBtn.addEventListener("click", () => {
       refreshBtnText.textContent = "Сканирую...";
       refreshTocBtn.style.opacity = "0.7";

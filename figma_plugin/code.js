@@ -1,6 +1,6 @@
 // Antigravity Live Bridge — Figma / FigJam Plugin
 if (typeof __html__ !== 'undefined') {
-  figma.showUI(__html__, { width: 320, height: 160, title: "ESL Remote" });
+  figma.showUI(__html__, { width: 320, height: 195, title: "ESL Remote" });
 }
 
 function getTOCStatus() {
@@ -32,6 +32,63 @@ function sendDocInfo() {
     exists: tocStat.exists,
     isVisible: tocStat.isVisible
   });
+}
+
+// Center camera viewport smoothly on the Table of Contents block
+async function navigateToTableOfContents() {
+  try {
+    let tocs = figma.currentPage.children.filter(n =>
+      (n.getPluginData && (n.getPluginData("role") === "table_of_contents" || n.getPluginData("is_toc") === "true")) ||
+      (n.name && (n.name.includes("ОГЛАВЛЕНИЕ") || n.name.includes("Table of Contents")))
+    );
+
+    // If not found on current page, check other pages in the document
+    if (tocs.length === 0 && figma.root && figma.root.children) {
+      for (const page of figma.root.children) {
+        if (page === figma.currentPage) continue;
+        const pageTocs = page.children.filter(n =>
+          (n.getPluginData && (n.getPluginData("role") === "table_of_contents" || n.getPluginData("is_toc") === "true")) ||
+          (n.name && (n.name.includes("ОГЛАВЛЕНИЕ") || n.name.includes("Table of Contents")))
+        );
+        if (pageTocs.length > 0) {
+          figma.currentPage = page;
+          tocs = pageTocs;
+          break;
+        }
+      }
+    }
+
+    // If still not found on canvas, automatically build the TOC from existing blocks!
+    if (tocs.length === 0) {
+      figma.notify("📑 Оглавление не найдено. Создаю оглавление...", { timeout: 2000 });
+      await refreshTableOfContents();
+      tocs = figma.currentPage.children.filter(n =>
+        (n.getPluginData && (n.getPluginData("role") === "table_of_contents" || n.getPluginData("is_toc") === "true")) ||
+        (n.name && (n.name.includes("ОГЛАВЛЕНИЕ") || n.name.includes("Table of Contents")))
+      );
+    }
+
+    if (tocs.length > 0) {
+      const target = tocs[0];
+      // If TOC was hidden, make it visible
+      if (!target.visible) {
+        target.visible = true;
+        figma.ui.postMessage({ type: "TOC_STATUS", exists: true, isVisible: true });
+      }
+      figma.viewport.scrollAndZoomIntoView([target]);
+      try {
+        figma.currentPage.selection = [target];
+      } catch (e) { }
+      figma.notify("🎯 Камера сфокусирована на оглавлении!", { timeout: 2000 });
+      return { success: true, targetId: target.id };
+    } else {
+      figma.notify("⚠️ Не удалось найти или создать оглавление", { timeout: 2500 });
+      return { success: false, error: "TOC node could not be created or found" };
+    }
+  } catch (err) {
+    figma.notify("✕ Ошибка перехода к оглавлению: " + String(err), { timeout: 3000 });
+    return { success: false, error: String(err) };
+  }
 }
 // ── Board Backup & Restore Engine ──────────────────────────────────────────
 function findBoardBackupGroup() {
@@ -912,7 +969,7 @@ function sendSelectionInfo() {
 sendSelectionInfo();
 
 // ── Interactive Handler for FigJam / Figma Boards ──────────────────────────
-function handleInteractiveSelection() {
+async function handleInteractiveSelection() {
   try {
     const sel = figma.currentPage.selection;
     if (!sel || sel.length === 0) return;
@@ -1221,14 +1278,7 @@ function handleInteractiveSelection() {
       (node.name && node.name.includes('В МЕНЮ')) ||
       (node.parent && node.parent.name && node.parent.name.includes('В МЕНЮ'));
     if (isBackToMenu) {
-      const target = figma.currentPage.children.find(c =>
-        (c.getPluginData && c.getPluginData('role') === 'table_of_contents') ||
-        (c.name && c.name.includes('ОГЛАВЛЕНИЕ ДОСКИ'))
-      );
-      if (target) {
-        figma.viewport.scrollAndZoomIntoView([target]);
-        figma.notify('📑 Переход в Оглавление доски', { timeout: 2000 });
-      }
+      await navigateToTableOfContents();
       return;
     }
 
@@ -4540,6 +4590,12 @@ async function handleCommand(cmd) {
       case "table_of_contents":
         return await refreshTableOfContents();
 
+      case "navigate_to_toc":
+      case "go_to_toc":
+      case "scroll_to_toc":
+      case "focus_toc":
+        return await navigateToTableOfContents();
+
       case "toggle_toc":
       case "hide_toc":
       case "show_toc": {
@@ -5082,6 +5138,10 @@ figma.ui.onmessage = async (msg) => {
       const w = typeof msg.width === "number" ? Math.max(300, msg.width) : 320;
       const h = typeof msg.height === "number" ? Math.max(100, msg.height) : 160;
       figma.ui.resize(w, h);
+      return;
+    }
+    if (msg.type === "NAVIGATE_TO_TOC" || msg.type === "GO_TO_TOC" || msg.type === "SCROLL_TO_TOC") {
+      await navigateToTableOfContents();
       return;
     }
     if (msg.type === "REFRESH_TOC" || msg.type === "REFRESH_TOC_REQUEST") {
