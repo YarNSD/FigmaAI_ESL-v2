@@ -86,7 +86,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
     last_err = ""
 
     for target_model in candidates:
-        cmd = ["agy", "-p", prompt, "--disable-slash-commands", "--print-timeout", "45s"]
+        cmd = ["agy", "-p", prompt, "--disable-slash-commands", "--print-timeout", "60s"]
         if target_model:
             cmd.extend(["--model", target_model])
         else:
@@ -104,7 +104,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 text=True,
                 encoding="utf-8",
                 env=env,
-                timeout=50,
+                timeout=65,
                 stdin=subprocess.DEVNULL,
                 **kwargs
             )
@@ -143,14 +143,9 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 "Включите в вашем VPN узел США (USA) или Великобританию (UK)."
             )
 
-        # If 503 / capacity issue, try next model
-        if any(w in err_msg for w in ["503", "No capacity available", "UNAVAILABLE", "rate limit", "Too Many Requests"]):
-            logger.warning(f"⚠️ Модель {target_model} вернула {err_msg[:60]}... Переключаюсь на следующую модель...")
-            continue
-        else:
-            # Another error, log and break
-            logger.error(f"Antigravity CLI error with model {target_model}: {err_msg}")
-            break
+        # For any other failure (503, timeout, print timeout, capacity, syntax), try next model candidate
+        logger.warning(f"⚠️ Модель {target_model} не ответила ({err_msg[:80]})... Пробую резервную модель...")
+        continue
 
     raise RuntimeError(f"Antigravity CLI error: {last_err}")
 

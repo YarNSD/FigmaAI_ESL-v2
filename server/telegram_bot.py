@@ -746,36 +746,63 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
 
 # ── Natural Language Command & Confirmation Detection Helpers ─────────────────
 
-CONFIRMATION_EXACT_WORDS = {
-    "делай", "давай", "создавай", "рисуй", "погнали", "ок", "ok", "да", "yes", "го", "go",
-    "начинай", "вперед", "вперёд", "стартуй", "закидывай", "закинь", "готов", "согласен",
-    "подходит", "отлично", "супер", "хорошо", "действуй", "генерируй", "запускай",
-    "сделай", "нарисуй", "создай", "do it", "let's go", "lets go", "ага", "плюс", "+",
-    "делай квиз", "рисуй на доске", "нарисуй это", "сделай это", "делай урок", "давай делай",
-    "да делай", "да давай", "давай рисуй", "делай давай", "конечно", "делай!", "давай!",
-    "да, делай", "да, давай", "да, рисуй", "ок делай", "ок давай", "поехали"
-}
-
-
 def is_confirmation_phrase(text: str) -> bool:
-    """Check if teacher's message confirms drawing/building the pending lesson plan."""
-    cleaned = re.sub(r"[!.,?]+", "", text.strip().lower()).strip()
-    if cleaned in CONFIRMATION_EXACT_WORDS:
+    """
+    Check if teacher's message confirms drawing/building the pending lesson plan.
+    Supports single-word and multi-word affirmations ('да', 'хорошо', 'да, хорошо', 'давай делай', 'супер', '+', etc.)
+    with strict exclusion of negative/cancellation tokens.
+    """
+    cleaned = re.sub(r"[!.,?+\-_/]+", " ", text.strip().lower()).strip()
+    words = cleaned.split()
+    if not words:
+        return text.strip() in ("+", "++", "+++")
+
+    # Rejection or cancellation tokens take precedence
+    negative_words = {
+        "нет", "не", "подожди", "стоп", "отмена", "отмени", "погоди",
+        "переделай", "поменяй", "измени", "убери", "исправь", "другое", "не надо", "не то"
+    }
+    if any(w in negative_words for w in words):
+        return False
+
+    affirmative_words = {
+        "да", "yes", "ага", "угу", "ок", "ok", "делай", "давай", "рисуй", "создавай",
+        "погнали", "поехали", "го", "go", "хорошо", "отлично", "супер", "класс",
+        "подходит", "согласен", "готов", "конечно", "добро", "принято", "действуй",
+        "запускай", "стартуй", "начинай", "вперед", "вперёд", "пойдет", "пойдёт",
+        "плюс", "круто", "замечательно", "прекрасно", "ладно", "делайте", "давайте",
+        "рисуйте", "создавайте", "красота"
+    }
+
+    # 1. Single affirmative word ("да", "ок", "хорошо", "делай", "давай", etc.)
+    if len(words) == 1 and words[0] in affirmative_words:
         return True
 
-    tokens = [
-        "делай", "давай", "рисуй", "создавай", "погнали", "закидывай", "стартуй",
-        "начинай", "действуй", "запускай", "поехали"
-    ]
-    words = cleaned.split()
-    if words and (words[0] in tokens or (words[0] in ("да", "ок", "ok", "хорошо") and len(words) > 1 and words[1] in tokens)):
-        return True
+    # 2. Short phrases (<= 5 words) containing affirmative word or approval pattern
+    # e.g. "да, хорошо", "хорошо, делай", "да, давай так", "да, всё ок", "мне нравится", "отличный план"
+    if len(words) <= 5:
+        if any(w in affirmative_words for w in words):
+            return True
+        if "нравится" in words or ("отличный" in words and "план" in words):
+            return True
+
     return False
 
 
 def is_direct_create_command(text: str) -> bool:
-    """Check if teacher explicitly commands to create/draw a specific ESL block using natural language."""
+    """
+    Check if teacher explicitly commands to create/draw a specific ESL block using natural language.
+    Cleans leading conversational pleasantries ('привет', 'слушай', 'пожалуйста', etc.)
+    and detects both prefix commands and action verbs + block markers.
+    """
     lower = text.lower().strip()
+    # Strip greetings and common pleasantries
+    cleaned = re.sub(
+        r"^(?:привет|здравствуй(?:те)?|добрый\s+(?:день|вечер|утро)|хай|хей|hello|hi|слушай(?:те)?|пожалуйста|бот|эй|давай|можешь(?:\s+пожалуйста)?)\s*[,!.:-]*\s*",
+        "",
+        lower
+    ).strip()
+
     create_prefixes = (
         "/draw_now", "/create_now",
         "нарисуй на доске", "нарисуй", "нарисовать",
@@ -786,18 +813,30 @@ def is_direct_create_command(text: str) -> bool:
         "построй на доске", "построй",
         "накидай быстренько", "накидай", "накидать",
         "накидал быстренько", "накидал", "накидали",
+        "подготовь на доске", "подготовь", "подготовить",
         "собери урок", "собери занятие", "собери"
     )
-    starts_with_prefix = any(lower.startswith(p) for p in create_prefixes)
-    if not starts_with_prefix:
-        return False
-
     block_markers = (
         "квиз", "quiz", "тест", "открываш", "peekaboo", "flip", "карточк", "флешкарт",
         "flashcard", "словар", "vocab", "слов", "пропуск", "fill", "разминк", "warmup",
         "speaking", "говор", "урок", "заняти", "lesson", "блум", "bloom", "вопрос", "задани"
     )
-    return any(marker in lower for marker in block_markers)
+
+    # Check prefix on raw lower text or stripped text
+    if any(lower.startswith(p) or cleaned.startswith(p) for p in create_prefixes):
+        if any(marker in lower for marker in block_markers):
+            return True
+
+    # Check if text contains a create verb and a block marker in a focused command
+    create_verbs = [
+        "нарисуй", "создай", "сделай", "сгенерируй", "закинь", "построй", "накидай", "собери", "подготовь"
+    ]
+    has_create_verb = any(re.search(rf"\b{v}\w*\b", lower) for v in create_verbs)
+    has_block_marker = any(marker in lower for marker in block_markers)
+    if has_create_verb and has_block_marker and len(lower.split()) <= 30:
+        return True
+
+    return False
 
 
 def is_status_query(text: str) -> bool:
@@ -807,9 +846,18 @@ def is_status_query(text: str) -> bool:
         "ты точно делаешь", "ты делаешь", "делаешь ли", "на каком этапе", "на каком ты этапе",
         "когда сделаешь", "когда закончишь", "сообщи о том,что закончил", "сообщи когда закончил",
         "долго еще", "долго ещё", "статус генерации", "статус задания", "делается ли",
-        "ты начал", "процесс идет", "процесс идёт", "уже готово", "готово ли"
+        "ты начал", "процесс идет", "процесс идёт", "уже готово", "готово ли",
+        "ты уже делаешь", "уже делаешь", "ты создаешь", "ты уже создаешь", "уже создаешь",
+        "ты рисуешь", "ты уже рисуешь", "уже рисуешь", "делаешь сейчас", "сейчас делаешь",
+        "в процессе", "ты уже начал", "уже начал", "ты делаешь задание", "ты уже делаешь задание"
     ]
-    return any(p in lower for p in status_patterns)
+    if any(p in lower for p in status_patterns):
+        return True
+
+    if re.search(r"\b(?:ты\s+)?(?:уже\s+|сейчас\s+)?(?:делаешь|рисуешь|создаешь|генерируешь|начал|занимаешься)\b", lower):
+        return True
+
+    return False
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):

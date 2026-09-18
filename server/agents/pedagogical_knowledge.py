@@ -364,8 +364,42 @@ def analyze_and_respond(
     # ═════════════════════════════════════════════════════════════════════════
     # 0.04 AFFIRMATIONS & SHORT ACKNOWLEDGMENTS
     # ═════════════════════════════════════════════════════════════════════════
-    ack_pattern = r"^(ок|okay|ok|ладно|хорошо|договорились|супер|отлично|класс|круто|огонь|кайф|понятно|ясно|понял|принял|ясненько|понял тебя|чудно|замечательно)[\s\.\!\?]*$"
-    if re.search(ack_pattern, msg_lower):
+    ack_pattern = r"^(?:да\s*,?\s*)?(ок|okay|ok|ладно|хорошо|договорились|супер|отлично|класс|круто|огонь|кайф|понятно|ясно|понял|принял|ясненько|понял тебя|чудно|замечательно|давай|делай|давай делать|согласен|подходит|плюс)[\s\.\!\?]*$"
+    if re.search(ack_pattern, msg_lower) or msg_lower in ("да", "да, хорошо", "хорошо", "давай", "делай", "да давай"):
+        # Check if previous assistant turn proposed an activity or asked confirmation
+        has_pending_proposal = False
+        proposed_topic = ctx.get("topic_en", "Daily Life & Routines")
+        proposed_title = ctx.get("topic_ru", "Урок")
+        proposed_type = ctx.get("activity_type") or "quiz_photo"
+        for turn in reversed(history[-3:]):
+            if turn.get("role") in ("assistant", "model"):
+                c_txt = (turn.get("content") or "").lower()
+                if any(w in c_txt for w in ["план", "подготовим", "нарисуем", "создадим", "напиши", "делай", "на доске", "урок", "квиз"]):
+                    has_pending_proposal = True
+                    break
+
+        if has_pending_proposal:
+            type_title = "Фото-квиз" if proposed_type == "quiz_photo" else "Комплексный урок"
+            reply = (
+                f"🚀 **Отлично, запускаю создание на доске!**\n\n"
+                f"Переношу «{type_title}: {proposed_title}» прямо на холст FigJam..."
+            )
+            lesson_plan = {
+                "title": f"{type_title}: {proposed_title}",
+                "topic": proposed_topic,
+                "level": target_level,
+                "format": "game" if ctx["is_child"] else "conversational",
+                "use_bloom_arc": False,
+                "blocks": [proposed_type]
+            }
+            return {
+                "reply": reply,
+                "suggested_replies": [],
+                "ready_to_build": True,
+                "lesson_plan": lesson_plan,
+                "student_id": student["id"] if student else None
+            }
+
         reply = (
             "Договорились! 👌 Буду здесь. Как только понадобится сгенерировать блок, обновить оглавление на холсте или обсудить ученика — я наготове."
         )
