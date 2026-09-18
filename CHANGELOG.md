@@ -5,6 +5,19 @@
 
 ---
 
+## [0.11.0-beta.11] — 2026-09-18 (Ветка `beta`)
+
+### 🐛 Исправление сбоя создания заданий из Telegram-бота: восстановление методов истории `chat_agent`
+- **Проблема**:
+  - При отправке запроса на генерацию блока из Telegram (*«Funny Animals Quiz»*, *«Задание: Funny Animals & Their Superpowers»*) бот падал с фатальной ошибкой `AttributeError: module 'server.agents.chat_agent' has no attribute 'get_shared_history'`.
+  - Первопричина: при рефакторинге диалогового чата методы работы с историей были переименованы в `get_user_history`, но в `server/agents/orchestrator.py` и `server/main.py` сохранились вызовы `get_shared_history()` и `clear_shared_history()`.
+- **Что исправлено**:
+  - В `server/agents/chat_agent.py` восстановлены и зафиксированы методы `get_shared_history()`, `add_to_shared_history()`, `clear_shared_history()` с полной обратной совместимостью.
+  - Перезапущен фоновый серверный процесс с подключением к Figma-мосту и Telegram-боту.
+  - Протестирована и подтверждена корректная работа чтения/записи истории и генерации контента.
+
+---
+
 ## [0.11.0-beta.10] — 2026-09-18 (Ветка `beta`)
 
 ### 🎯 Мгновенный поиск и центрирование на оглавлении: кнопка «Перейти к меню» в плагине

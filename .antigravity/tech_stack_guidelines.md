@@ -838,3 +838,10 @@
       3) В `chat_agent.py` естественный текст ответа принимается напрямую, внедрена память по `user_key=uid`.
       4) В `ai_engine.py` настроен приоритет быстрых flash-моделей (3–10с), сетевые таймауты загрузки аватара исключены из ошибок геолокации, убран паразитный вывод токенов.
       5) Убран блок токенов и паразитные кнопки из диалоговых сообщений (добавлены команды `/tokens` и `/status`). Черновики уроков теперь истекают через 5 минут, не блокируя свободное общение.
+
+81. **AttributeError: module 'server.agents.chat_agent' has no attribute 'get_shared_history' при генерации из Telegram**:
+    - *Проблема*:
+      При рефакторинге `chat_agent.py` методы работы с историей были переименованы в `get_user_history`, `add_to_user_history`, `clear_user_history`, однако вызовы `chat_agent.get_shared_history()` из `server/agents/orchestrator.py` (строки 216 и 891) и `server/main.py` (строка 815), а также `chat_agent.clear_shared_history()` (строка 821) не были сохранены для обратной совместимости. В результате при попытке сгенерировать блок на доске из Telegram-бота `orchestrator.process_command` падал с фатальным исключением `AttributeError: module 'server.agents.chat_agent' has no attribute 'get_shared_history'`, и бот выдавал ошибку «❌ Ошибка: module 'server.agents.chat_agent' has no attribute 'get_shared_history'».
+    - *Решение*:
+      В `server/agents/chat_agent.py` восстановлены и зафиксированы методы `get_shared_history()`, `add_to_shared_history()`, `clear_shared_history()`, делегирующие вызовы в `_SHARED_CHAT_HISTORY` и обеспечивающие 100% обратную совместимость для оркестратора и веб-панели.
+

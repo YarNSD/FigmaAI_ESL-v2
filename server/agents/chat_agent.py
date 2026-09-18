@@ -39,6 +39,11 @@ def get_user_history(user_key: str = "shared", limit: int = 20) -> List[Dict[str
     return list(hist[-limit:])
 
 
+def get_shared_history(limit: int = 50) -> List[Dict[str, Any]]:
+    """Return shared conversation history across Web and Telegram."""
+    return list(_SHARED_CHAT_HISTORY[-limit:])
+
+
 def add_to_user_history(user_key: str, role: str, content: str, source: str = "telegram", **kwargs) -> None:
     """Add a message to user-specific and shared conversation history."""
     msg_item = {
@@ -59,12 +64,23 @@ def add_to_user_history(user_key: str, role: str, content: str, source: str = "t
         _SHARED_CHAT_HISTORY.pop(0)
 
 
+def add_to_shared_history(role: str, content: str, source: str = "web", **kwargs) -> None:
+    """Add a message to shared conversation history."""
+    add_to_user_history(user_key="shared", role=role, content=content, source=source, **kwargs)
+
+
 def clear_user_history(user_key: str = "shared") -> None:
     """Clear history for a specific user session."""
     if user_key in _USER_CHAT_HISTORIES:
         _USER_CHAT_HISTORIES[user_key].clear()
     if user_key == "shared":
         _SHARED_CHAT_HISTORY.clear()
+
+
+def clear_shared_history() -> None:
+    """Clear shared conversation history."""
+    _SHARED_CHAT_HISTORY.clear()
+    _USER_CHAT_HISTORIES.clear()
 
 
 CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницательный персональный ИИ-собеседник и напарник преподавателя в проекте FigmaAI.
