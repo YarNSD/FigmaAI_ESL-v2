@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from server import config, agent_logger, bridge
-from server.agents import content_agent, layout_agent, ai_engine, vision_agent, student_agent, image_agent, toc_agent, bloom_taxonomy
+from server.agents import content_agent, layout_agent, ai_engine, vision_agent, student_agent, image_agent, toc_agent, bloom_taxonomy, chat_agent
 
 logger = logging.getLogger("orchestrator")
 
@@ -909,6 +909,17 @@ async def process_command(
         message=f"Составляю вопросы, лексику и отвлекающие варианты по стандарту CEFR {lv}..."
     )
     try:
+        # Validate and normalize pre-approved content if passed from chat/telegram
+        if content and isinstance(content, dict):
+            content = chat_agent.normalize_draft_content(content, block_type=bt, topic=tp, level=lv)
+            if not chat_agent.is_content_valid_for_block_type(bt, content):
+                logger.warning(
+                    f"Pre-approved content for {bt} is missing required items or empty "
+                    f"({list(content.keys()) if isinstance(content, dict) else content}). "
+                    f"Falling back to educational content generator..."
+                )
+                content = None  # Force generation below so empty blocks are never drawn
+
         if content and isinstance(content, dict):
             logger.info(f"Using pre-approved content for {bt}: {content.get('title')}")
             no_images = any(k in (command or "").lower() for k in [

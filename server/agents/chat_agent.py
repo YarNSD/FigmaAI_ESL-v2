@@ -123,28 +123,273 @@ CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницатель�
   "extracted_student_facts": null,
   "ready_to_build": true,
   "lesson_plan": {
-    "topic": "Funny Animals",
-    "level": "A2",
-    "block_type": "quiz_photo",
-    "title": "🐾 Funny Animals & Superpowers Quiz",
-    "content": {
-      "title": "🐾 Funny Animals & Superpowers Quiz",
-      "topic": "Funny Animals",
-      "level": "A2",
-      "instruction": "👉 Выберите правильный вариант ответа для каждого животного.",
-      "questions": [
-        {
-          "id": 1,
-          "sentence": "Who is hiding in the box?",
-          "options": ["A sleepy cat", "A playful puppy", "A tiny hamster"],
-          "correct_index": 0,
-          "image_query": "cute fluffy ginger cat peeking out of a cardboard box",
-          "explanation": "Correct answer is A sleepy cat"
-        }
-      ]
+      "topic": "School Supplies",
+      "level": "A1",
+      "block_type": "vocabulary_table",
+      "title": "🎒 School Supplies Vocabulary",
+      "content": {
+        "title": "🎒 School Supplies Vocabulary",
+        "topic": "School Supplies",
+        "level": "A1",
+        "instruction": "👉 Изучите новые слова, их перевод и примеры.",
+        "rows": [
+          {
+            "id": 1,
+            "word": "Backpack [ˈbækpæk]",
+            "translation": "Рюкзак / портфель",
+            "type": "noun",
+            "example": "I have a blue backpack.",
+            "image_query": "blue school backpack"
+          }
+        ]
+      }
     }
-  }
-}"""
+}
+Примеры структуры content в lesson_plan для других типов:
+- quiz_photo: {"questions": [{"id": 1, "sentence": "...", "options": ["A", "B", "C"], "correct_index": 0, "image_query": "...", "explanation": "..."}]}
+- vocabulary_table: {"rows": [{"id": 1, "word": "word [IPA]", "translation": "перевод", "type": "noun", "example": "sentence", "image_query": "..."}]}
+- speaking_cards: {"cards": [{"id": 1, "prompt": "...", "question": "...", "image_query": "..."}]}
+- fill_blanks: {"sentences": [{"id": 1, "sentence": "She ___ to school.", "missing": "goes", "hint": "go / goes"}], "word_bank": ["goes"]}
+- flip_cards: {"cards": [{"id": 1, "front": "...", "back": "...", "image_query": "..."}]}
+"""
+
+
+def is_content_valid_for_block_type(btype: str, content: Any) -> bool:
+    """Check if content has at least 2 structured items required for layout_agent rendering."""
+    if not content or not isinstance(content, dict):
+        return False
+    if btype == "quiz_photo":
+        return len(content.get("questions", [])) >= 2
+    elif btype == "vocabulary_table":
+        return len(content.get("rows", [])) >= 2
+    elif btype in ("speaking_cards", "flip_cards", "flashcards"):
+        return len(content.get("cards", [])) >= 2
+    elif btype == "fill_blanks":
+        return len(content.get("sentences", [])) >= 2
+    elif btype == "video_quiz":
+        return len(content.get("questions", [])) >= 2
+    return True
+
+
+def normalize_draft_content(
+    content: Optional[Dict[str, Any]],
+    block_type: Optional[str] = None,
+    topic: Optional[str] = None,
+    level: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Standardizes arbitrary keys produced by various LLM models (e.g. 'items', 'words', 'vocabulary' -> 'rows',
+    'questions' -> 'sentences' for fill_blanks, etc.) into the strict format expected by layout_agent.
+    """
+    if not content or not isinstance(content, dict):
+        return content
+
+    top = topic or content.get("topic") or "English"
+    lvl = level or content.get("level") or "A2"
+    btype = block_type or content.get("block_type") or "quiz_photo"
+
+    content.setdefault("title", f"🎯 {top} {btype.replace('_', ' ').title()}")
+    content.setdefault("topic", top)
+    content.setdefault("level", lvl)
+    if not content.get("hashtags"):
+        content["hashtags"] = [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#esl", f"#{btype}"]
+
+    # 1. Vocabulary Table
+    if btype == "vocabulary_table":
+        raw_items = (
+            content.get("rows")
+            or content.get("items")
+            or content.get("words")
+            or content.get("vocabulary")
+            or content.get("terms")
+            or content.get("data")
+            or []
+        )
+        if isinstance(raw_items, list) and raw_items:
+            normalized_rows = []
+            for i, item in enumerate(raw_items):
+                if isinstance(item, dict):
+                    w = str(item.get("word") or item.get("term") or item.get("front") or "").strip()
+                    tr = str(item.get("transcription") or "").strip()
+                    if tr and tr not in w:
+                        w_full = f"{w} {tr}" if (tr.startswith("[") or tr.startswith("/")) else f"{w} [{tr}]"
+                    else:
+                        w_full = w
+
+                    trans = str(item.get("translation") or item.get("meaning") or item.get("back") or item.get("russian") or "").strip()
+                    pos = str(item.get("type") or item.get("pos") or item.get("role") or "").strip()
+                    ex = str(item.get("example") or item.get("sentence") or item.get("sample") or "").strip()
+                    img = str(item.get("image_query") or item.get("image") or f"{top} {w}").strip()
+
+                    normalized_rows.append({
+                        "id": i + 1,
+                        "word": w_full,
+                        "translation": trans,
+                        "type": pos,
+                        "example": ex,
+                        "image_query": img
+                    })
+                elif isinstance(item, str) and "—" in item:
+                    parts = [p.strip() for p in item.split("—", 1)]
+                    normalized_rows.append({
+                        "id": i + 1,
+                        "word": parts[0],
+                        "translation": parts[1] if len(parts) > 1 else "",
+                        "type": "",
+                        "example": "",
+                        "image_query": f"{top} {parts[0]}"
+                    })
+            if normalized_rows:
+                content["rows"] = normalized_rows
+                content.setdefault("instruction", "👉 Изучите новые слова, их перевод и примеры в речи.")
+                content.setdefault("columns", ["Картинка", "№ / Слово (Word)", "Перевод (Russian)", "Тип / Роль (Role)", "Пример в речи (Example Sentence)"])
+
+    # 2. Fill in the Blanks
+    elif btype == "fill_blanks":
+        raw_items = (
+            content.get("sentences")
+            or content.get("questions")
+            or content.get("items")
+            or content.get("blanks")
+            or content.get("data")
+            or []
+        )
+        if isinstance(raw_items, list) and raw_items:
+            normalized_sentences = []
+            word_bank = list(content.get("word_bank") or [])
+            for i, item in enumerate(raw_items):
+                if isinstance(item, dict):
+                    sent = str(item.get("sentence") or item.get("text") or item.get("question") or "").strip()
+                    missing = str(item.get("missing") or item.get("answer") or item.get("correct") or "").strip()
+                    opts = item.get("options") or []
+                    c_idx = item.get("correct_index", 0)
+
+                    if not missing and opts and isinstance(opts, list) and 0 <= c_idx < len(opts):
+                        missing = str(opts[c_idx]).strip()
+
+                    hint = str(item.get("hint") or "").strip()
+                    if not hint and opts and isinstance(opts, list):
+                        hint = " / ".join(str(o) for o in opts)
+
+                    if "___" not in sent and missing:
+                        sent = re.sub(rf"\b{re.escape(missing)}\b", "___", sent, count=1, flags=re.IGNORECASE)
+
+                    if missing and missing not in word_bank:
+                        word_bank.append(missing)
+
+                    normalized_sentences.append({
+                        "id": i + 1,
+                        "sentence": sent,
+                        "missing": missing,
+                        "hint": hint
+                    })
+            if normalized_sentences:
+                content["sentences"] = normalized_sentences
+                content.setdefault("word_bank", word_bank)
+                content.setdefault("instruction", "👉 Заполните пропуски подходящими по смыслу словами.")
+
+    # 3. Speaking Cards
+    elif btype == "speaking_cards":
+        raw_items = (
+            content.get("cards")
+            or content.get("questions")
+            or content.get("items")
+            or content.get("prompts")
+            or content.get("data")
+            or []
+        )
+        if isinstance(raw_items, list) and raw_items:
+            normalized_cards = []
+            for i, item in enumerate(raw_items):
+                if isinstance(item, dict):
+                    q = str(item.get("question") or item.get("prompt") or item.get("title") or "").strip()
+                    prompt = str(item.get("prompt") or item.get("title") or q).strip()
+                    img = str(item.get("image_query") or item.get("image") or f"{top} {q[:30]}").strip()
+                    follow_up = str(item.get("follow_up") or item.get("explanation") or "").strip()
+                    normalized_cards.append({
+                        "id": i + 1,
+                        "prompt": prompt,
+                        "question": q,
+                        "image_query": img,
+                        "follow_up": follow_up
+                    })
+                elif isinstance(item, str):
+                    normalized_cards.append({
+                        "id": i + 1,
+                        "prompt": item.strip(),
+                        "question": item.strip(),
+                        "image_query": f"{top} {item[:30]}"
+                    })
+            if normalized_cards:
+                content["cards"] = normalized_cards
+                content.setdefault("instruction", "👉 Обсудите вопросы с партнером или преподавателем.")
+
+    # 4. Flip Cards
+    elif btype == "flip_cards":
+        raw_items = (
+            content.get("cards")
+            or content.get("pairs")
+            or content.get("items")
+            or content.get("questions")
+            or content.get("data")
+            or []
+        )
+        if isinstance(raw_items, list) and raw_items:
+            normalized_cards = []
+            for i, item in enumerate(raw_items):
+                if isinstance(item, dict):
+                    front = str(item.get("front") or item.get("question") or item.get("prompt") or item.get("word") or "").strip()
+                    back = str(item.get("back") or item.get("answer") or item.get("translation") or item.get("meaning") or "").strip()
+                    img = str(item.get("image_query") or item.get("image") or f"{top} {front}").strip()
+                    normalized_cards.append({
+                        "id": i + 1,
+                        "front": front,
+                        "back": back,
+                        "image_query": img
+                    })
+            if normalized_cards:
+                content["cards"] = normalized_cards
+                content.setdefault("instruction", "👉 Нажмите на карточку, чтобы узнать ответ или перевод!")
+
+    # 5. Quiz Photo
+    elif btype == "quiz_photo":
+        raw_items = (
+            content.get("questions")
+            or content.get("items")
+            or content.get("quiz")
+            or content.get("data")
+            or []
+        )
+        if isinstance(raw_items, list) and raw_items:
+            normalized_questions = []
+            for i, item in enumerate(raw_items):
+                if isinstance(item, dict):
+                    sentence = str(item.get("sentence") or item.get("question") or item.get("text") or "").strip()
+                    opts = item.get("options") or []
+                    if isinstance(opts, str):
+                        opts = [o.strip() for o in opts.split(",")]
+                    c_idx = item.get("correct_index", 0)
+                    try:
+                        c_idx = int(c_idx)
+                    except (ValueError, TypeError):
+                        c_idx = 0
+                    img = str(item.get("image_query") or item.get("image") or f"{top} {sentence[:30]}").strip()
+                    expl = str(item.get("explanation") or (f"Correct answer is {opts[c_idx]}" if (opts and 0 <= c_idx < len(opts)) else "")).strip()
+
+                    if len(opts) >= 2:
+                        normalized_questions.append({
+                            "id": i + 1,
+                            "sentence": sentence,
+                            "options": [str(o).strip() for o in opts],
+                            "correct_index": max(0, min(c_idx, len(opts) - 1)),
+                            "image_query": img,
+                            "explanation": expl
+                        })
+            if normalized_questions:
+                content["questions"] = normalized_questions
+                content.setdefault("instruction", "👉 Выберите правильный вариант ответа.")
+
+    return content
 
 
 def parse_draft_content_from_text(
@@ -154,16 +399,16 @@ def parse_draft_content_from_text(
     level: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Robust fallback parser: extracts questions, options, correct answers (marked with (✅)),
-    and image prompts (Картинка: ...) from the LLM chat reply text.
-    Ensures that even if the LLM outputs plain markdown, exact structured content is preserved for Figma.
+    Robust universal fallback parser: extracts questions, vocabulary rows, fill-blanks,
+    speaking cards, and flip cards from markdown LLM responses.
+    Ensures that even if LLM responds in plain text, structured content is ready for Figma canvas.
     """
     if not reply_text or len(reply_text) < 30:
         return None
 
     top = topic or "English"
     lvl = level or "A2"
-    btype = block_type or "quiz_photo"
+    btype = block_type
 
     # Detect topic from text if generic
     if top in ("English", "Урок", None):
@@ -176,23 +421,22 @@ def parse_draft_content_from_text(
     if m_lvl:
         lvl = m_lvl.group(1).upper()
 
-    # 1. Parse Multiple Choice Quiz Questions
-    q_chunks = re.split(r"(?:\n|^)\s*(?:(?:\d{1,2}\.|\d{1,2}\)|№\s*\d{1,2}|Question\s+\d{1,2}[:.]?)\s*)", reply_text)
-    questions = []
-    opt_regex = re.compile(r"^(?:[-*•]\s*)?(?:[A-Fa-f0-9][\).:-]|\d[\).:-])\s*(.*)$")
-    img_regex = re.compile(r"(?:\(|\[)?\s*(?:Картинка|Иллюстрация|Image|Photo|Visual)\s*[:—\-]\s*([^\]\)]+)(?:\)|\])?", re.IGNORECASE)
+    img_regex = re.compile(
+        r"(?:\(|\[)?\s*(?:Картинка|Иллюстрация|Image|Photo|Visual)\s*[:—\-]\s*([^\]\)]+)(?:\)|\])?",
+        re.IGNORECASE
+    )
 
+    q_chunks = re.split(r"(?:\n|^)\s*(?:(?:\d{1,2}\.|\d{1,2}\)|№\s*\d{1,2}|Question\s+\d{1,2}[:.]?|Card\s+\d{1,2}[:.]?)\s*)", reply_text)
+
+    # 1. Parse Multiple Choice Quiz Questions
+    opt_regex = re.compile(r"^(?:[-*•]\s*)?(?:[A-Fa-f0-9][\).:-]|\d[\).:-])\s*(.*)$")
+    questions = []
     for chunk in q_chunks[1:]:
         lines = [line.strip() for line in chunk.strip().split("\n") if line.strip()]
         if not lines:
             continue
-
         raw_sentence = lines[0]
-        # Remove leading emojis and numbering
-        sentence = re.sub(r"^[\W\d_]*[^\w\s]*\s*", "", raw_sentence).strip()
-        if not sentence:
-            sentence = raw_sentence
-
+        sentence = re.sub(r"^[\W\d_]*[^\w\s]*\s*", "", raw_sentence).strip() or raw_sentence
         options = []
         correct_idx = 0
         image_query = ""
@@ -202,7 +446,6 @@ def parse_draft_content_from_text(
             if m_img:
                 image_query = m_img.group(1).strip()
                 continue
-
             m_opt = opt_regex.match(line)
             if m_opt:
                 opt_text = m_opt.group(1).strip()
@@ -210,7 +453,6 @@ def parse_draft_content_from_text(
                 if any(marker in opt_text for marker in ("(✅)", "✅", "[x]", "[X]", "(+)", "(верно)", "(правильно)", "(correct)")):
                     is_correct = True
                     opt_text = re.sub(r"\s*(?:\(✅\)|✅|\[x\]|\[X\]|\(\+\)|\(верно\)|\(правильно\)|\(correct\))\s*", "", opt_text).strip()
-
                 if is_correct:
                     correct_idx = len(options)
                 options.append(opt_text)
@@ -229,8 +471,8 @@ def parse_draft_content_from_text(
                 "explanation": f"Correct answer is {correct_val}"
             })
 
-    if len(questions) >= 2:
-        return {
+    if len(questions) >= 2 and (not btype or btype == "quiz_photo"):
+        res = {
             "title": f"🎯 {top} Quiz",
             "topic": top,
             "level": lvl,
@@ -238,37 +480,191 @@ def parse_draft_content_from_text(
             "questions": questions,
             "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#quiz", "#interactive", "#esl"]
         }
+        return normalize_draft_content(res, "quiz_photo", top, lvl)
 
-    # 2. Parse Speaking Cards
-    card_chunks = re.split(r"(?:\n|^)\s*(?:(?:\d{1,2}\.|\d{1,2}\)|Card\s+\d{1,2}[:.]?)\s*)", reply_text)
-    cards = []
-    for chunk in card_chunks[1:]:
+    # 2. Parse Vocabulary Table
+    vocab_rows = []
+    table_lines = [l.strip() for l in reply_text.split("\n") if l.strip().startswith("|") and not l.strip().startswith("|---")]
+    if len(table_lines) >= 3:
+        for line in table_lines[1:]:
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            if len(cols) >= 2:
+                w_col = cols[1] if cols[0].isdigit() and len(cols) > 2 else cols[0]
+                tr_col = cols[2] if cols[0].isdigit() and len(cols) > 2 else cols[1]
+                role_col = cols[3] if len(cols) > 3 else ""
+                ex_col = cols[4] if len(cols) > 4 else ""
+                vocab_rows.append({
+                    "id": len(vocab_rows) + 1,
+                    "word": w_col,
+                    "translation": tr_col,
+                    "type": role_col,
+                    "example": ex_col,
+                    "image_query": f"{top} {w_col}"
+                })
+    if not vocab_rows:
+        for chunk in q_chunks[1:]:
+            lines = [l.strip() for l in chunk.strip().split("\n") if l.strip()]
+            if not lines:
+                continue
+            first_line = lines[0]
+            clean = re.sub(r"[*_`]", "", first_line).strip()
+            clean = re.sub(r"^[\d\.\)\s]*[^\w\s]*\s*", "", clean).strip()
+            parts = re.split(r"\s*[\—–\-:]\s*", clean, maxsplit=1)
+            if len(parts) == 2 and any(c in parts[1] for c in "абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"):
+                word_part = parts[0].strip()
+                trans_part = parts[1].strip()
+
+                role = ""
+                m_role = re.search(r"\((noun|verb|adjective|adverb|prep|phrase|сущ|глаг|прил)\w*\)", trans_part, re.IGNORECASE)
+                if m_role:
+                    role = m_role.group(1).lower()
+                    trans_part = re.sub(r"\s*\([^)]+\)\s*", "", trans_part).strip()
+
+                example = ""
+                image_query = f"{top} {word_part}"
+                for line in lines[1:]:
+                    m_ex = re.search(r"(?:Пример|Example|Sample|Ex)\s*[:—\-]\s*(.+)", line, re.IGNORECASE)
+                    if m_ex:
+                        example = m_ex.group(1).strip()
+                    m_im = img_regex.search(line)
+                    if m_im:
+                        image_query = m_im.group(1).strip()
+
+                vocab_rows.append({
+                    "id": len(vocab_rows) + 1,
+                    "word": word_part,
+                    "translation": trans_part,
+                    "type": role,
+                    "example": example,
+                    "image_query": image_query
+                })
+
+    if len(vocab_rows) >= 2 and (not btype or btype == "vocabulary_table" or any(k in reply_text.lower() for k in ("словарь", "слова", "лексик", "таблиц", "vocabulary"))):
+        res = {
+            "title": f"🎒 {top} Vocabulary",
+            "topic": top,
+            "level": lvl,
+            "instruction": "👉 Изучите новые слова, перевод и примеры использования в речи.",
+            "columns": ["Картинка", "№ / Слово (Word)", "Перевод (Russian)", "Тип / Роль (Role)", "Пример в речи (Example Sentence)"],
+            "rows": vocab_rows,
+            "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#vocabulary", "#esl", "#table"]
+        }
+        return normalize_draft_content(res, "vocabulary_table", top, lvl)
+
+    # 3. Parse Fill in the Blanks
+    blank_sentences = []
+    for chunk in q_chunks[1:]:
+        lines = [l.strip() for l in chunk.strip().split("\n") if l.strip()]
+        if not lines:
+            continue
+        first_line = lines[0]
+        if re.search(r"(?:_{2,}|\[\s*\]|\(\s*\)|\.{3,})", first_line):
+            clean_sent = re.sub(r"^[\W\d_]*[^\w\s]*\s*", "", first_line).strip()
+            clean_sent = re.sub(r"(?:_{2,}|\[\s*\]|\(\s*\)|\.{3,})", "___", clean_sent)
+            m_hint = re.search(r"\(([^)]+)\)", clean_sent)
+            hint = m_hint.group(1).strip() if m_hint else ""
+            missing = ""
+            if "/" in hint:
+                opts = [o.strip() for o in hint.split("/")]
+                missing = opts[0]
+            elif hint:
+                missing = hint
+
+            clean_sent = re.sub(r"\s*\([^)]+\)\s*", " ", clean_sent).strip()
+            clean_sent = re.sub(r"\s+", " ", clean_sent)
+            if "___" not in clean_sent:
+                clean_sent = f"{clean_sent} ___"
+
+            blank_sentences.append({
+                "id": len(blank_sentences) + 1,
+                "sentence": clean_sent,
+                "missing": missing or "answer",
+                "hint": hint
+            })
+
+    if len(blank_sentences) >= 2 and (not btype or btype == "fill_blanks" or any(k in reply_text.lower() for k in ("пропуск", "вставь", "blank", "fill"))):
+        w_bank = [s["missing"] for s in blank_sentences if s.get("missing")]
+        res = {
+            "title": f"✍️ {top} Fill in the Blanks",
+            "topic": top,
+            "level": lvl,
+            "instruction": "👉 Заполните пропуски подходящими по смыслу словами.",
+            "word_bank": w_bank,
+            "sentences": blank_sentences,
+            "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#grammar", "#fill_blanks", "#esl"]
+        }
+        return normalize_draft_content(res, "fill_blanks", top, lvl)
+
+    # 4. Parse Flip Cards
+    flip_cards = []
+    for chunk in q_chunks[1:]:
+        lines = [l.strip() for l in chunk.strip().split("\n") if l.strip()]
+        if not lines:
+            continue
+        front = ""
+        back = ""
+        img_q = top
+        for line in lines:
+            m_f = re.search(r"^(?:Лицевая|Front|Вопрос|Question|Word)\s*[:—\-]\s*(.+)", line, re.IGNORECASE)
+            if m_f:
+                front = m_f.group(1).strip()
+            m_b = re.search(r"^(?:Оборот|Back|Ответ|Answer|Translation|Перевод)\s*[:—\-]\s*(.+)", line, re.IGNORECASE)
+            if m_b:
+                back = m_b.group(1).strip()
+            m_img = img_regex.search(line)
+            if m_img:
+                img_q = m_img.group(1).strip()
+
+        if front and back:
+            flip_cards.append({
+                "id": len(flip_cards) + 1,
+                "front": front,
+                "back": back,
+                "image_query": img_q
+            })
+
+    if len(flip_cards) >= 2 and (not btype or btype == "flip_cards" or any(k in reply_text.lower() for k in ("секрет", "переворот", "открывашк", "flip", "карточк"))):
+        res = {
+            "title": f"🃏 {top} Flip Cards",
+            "topic": top,
+            "level": lvl,
+            "instruction": "👉 Нажмите на карточку, чтобы узнать ответ или перевод!",
+            "cards": flip_cards,
+            "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#flip_cards", "#memory", "#esl"]
+        }
+        return normalize_draft_content(res, "flip_cards", top, lvl)
+
+    # 5. Parse Speaking Cards
+    speaking_cards = []
+    for chunk in q_chunks[1:]:
         lines = [line.strip() for line in chunk.strip().split("\n") if line.strip()]
         if not lines:
             continue
         first_line = re.sub(r"^[\W\d_]*[^\w\s]*\s*", "", lines[0]).strip() or lines[0]
+        first_line = re.sub(r"[*_`]", "", first_line).strip()
         img_q = top
         for line in lines:
             m_img = img_regex.search(line)
             if m_img:
                 img_q = m_img.group(1).strip()
                 break
-        cards.append({
-            "id": len(cards) + 1,
+        speaking_cards.append({
+            "id": len(speaking_cards) + 1,
             "prompt": first_line,
             "question": first_line,
             "image_query": img_q
         })
 
-    if len(cards) >= 2 and any(k in reply_text.lower() for k in ("speaking", "бесед", "разминк", "вопрос", "дискусс", "обсужд")):
-        return {
+    if len(speaking_cards) >= 2 and (not btype or btype == "speaking_cards" or any(k in reply_text.lower() for k in ("speaking", "бесед", "разминк", "вопрос", "дискусс", "обсужд"))):
+        res = {
             "title": f"🗣️ {top} Speaking Cards",
             "topic": top,
             "level": lvl,
             "instruction": "👉 Обсудите вопросы с партнёром или преподавателем.",
-            "cards": cards,
+            "cards": speaking_cards,
             "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#speaking", "#discussion", "#esl"]
         }
+        return normalize_draft_content(res, "speaking_cards", top, lvl)
 
     return None
 
@@ -402,7 +798,7 @@ async def process_chat_message(
 
     reply_str = parsed.get("reply", "")
 
-    # Robust ensure: populate lesson_plan.content from text draft if missing or fallback
+    # Robust ensure: normalize and validate lesson_plan.content
     lp = parsed.get("lesson_plan")
     if parsed.get("ready_to_build") or lp:
         if not isinstance(lp, dict):
@@ -411,25 +807,45 @@ async def process_chat_message(
         top = lp.get("topic") or "English"
         lvl = lp.get("level") or (active_student.get("level") if active_student else "A2")
         btype = lp.get("block_type") or "quiz_photo"
-        if not lp.get("content"):
+
+        # 1. Normalize whatever LLM returned in content
+        if lp.get("content"):
+            lp["content"] = normalize_draft_content(lp["content"], block_type=btype, topic=top, level=lvl)
+
+        # 2. If content is still missing or has fewer than 2 items, extract from reply text
+        if not is_content_valid_for_block_type(btype, lp.get("content")):
             parsed_content = parse_draft_content_from_text(reply_str, block_type=btype, topic=top, level=lvl)
             if parsed_content:
-                lp["content"] = parsed_content
+                lp["content"] = normalize_draft_content(parsed_content, block_type=btype, topic=top, level=lvl)
                 if not lp.get("title"):
-                    lp["title"] = parsed_content.get("title")
-    else:
-        # Check if reply_str contains an exercise draft (questions with options)
-        parsed_content = parse_draft_content_from_text(reply_str)
-        if parsed_content and (parsed_content.get("questions") or parsed_content.get("cards")):
+                    lp["title"] = lp["content"].get("title")
+
+        # 3. Ensure title and ready_to_build flag if content is valid
+        if lp.get("content") and is_content_valid_for_block_type(btype, lp.get("content")):
             parsed["ready_to_build"] = True
-            b_type = "speaking_cards" if parsed_content.get("cards") else "quiz_photo"
-            parsed["lesson_plan"] = {
-                "title": parsed_content.get("title", "🎯 Interactive Quiz"),
-                "topic": parsed_content.get("topic", "English"),
-                "level": parsed_content.get("level", "A2"),
-                "block_type": b_type,
-                "content": parsed_content
-            }
+            if not lp.get("title"):
+                lp["title"] = lp["content"].get("title")
+    else:
+        # Check if reply_str contains an exercise draft of any type
+        parsed_content = parse_draft_content_from_text(reply_str)
+        if parsed_content:
+            b_type = (
+                "vocabulary_table" if parsed_content.get("rows")
+                else "fill_blanks" if parsed_content.get("sentences")
+                else "flip_cards" if ("flip" in (parsed_content.get("title") or "").lower())
+                else "speaking_cards" if parsed_content.get("cards")
+                else "quiz_photo"
+            )
+            normalized = normalize_draft_content(parsed_content, block_type=b_type)
+            if is_content_valid_for_block_type(b_type, normalized):
+                parsed["ready_to_build"] = True
+                parsed["lesson_plan"] = {
+                    "title": normalized.get("title", "🎯 Interactive Exercise"),
+                    "topic": normalized.get("topic", "English"),
+                    "level": normalized.get("level", "A2"),
+                    "block_type": b_type,
+                    "content": normalized
+                }
 
     # Extract student facts and update database if found
     extracted = parsed.get("extracted_student_facts")

@@ -406,12 +406,20 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan_level = plan.get("level")
         blocks = plan.get("blocks") or []
         b_type = plan.get("block_type") or ("bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo"))
+        content = plan.get("content")
+        if content and isinstance(content, dict):
+            if content.get("rows"):
+                b_type = "vocabulary_table"
+            elif content.get("sentences"):
+                b_type = "fill_blanks"
+            elif content.get("questions") and b_type not in ("quiz_photo", "video_quiz"):
+                b_type = "quiz_photo"
+
         student_id = plan.get("student_id") or context.user_data.get("selected_student_id")
         if student_id and not context.user_data.get("selected_student_id"):
             context.user_data["selected_student_id"] = student_id
         comments = plan.get("teacher_comments", "")
         cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
-        content = plan.get("content")
         await query.answer("Запускаю построение на доске...")
         await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level, content=content)
         return
@@ -887,12 +895,20 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         plan_level = pending_plan.get("level")
         blocks = pending_plan.get("blocks") or []
         b_type = pending_plan.get("block_type") or ("bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo"))
+        content = pending_plan.get("content")
+        if content and isinstance(content, dict):
+            if content.get("rows"):
+                b_type = "vocabulary_table"
+            elif content.get("sentences"):
+                b_type = "fill_blanks"
+            elif content.get("questions") and b_type not in ("quiz_photo", "video_quiz"):
+                b_type = "quiz_photo"
+
         student_id = pending_plan.get("student_id") or context.user_data.get("selected_student_id")
         if student_id and not context.user_data.get("selected_student_id"):
             context.user_data["selected_student_id"] = student_id
         comments = pending_plan.get("teacher_comments", "")
         cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
-        content = pending_plan.get("content")
         clean_text = text.strip().lower()
         if len(text.strip()) > 15 and clean_text not in ("делай", "давай", "рисуй", "создавай", "погнали", "переноси"):
             cmd_text += f". Пожелания: {text.strip()}"
