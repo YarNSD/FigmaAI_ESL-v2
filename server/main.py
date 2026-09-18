@@ -488,6 +488,7 @@ class CreateBlockRequest(BaseModel):
     blocks: Optional[list] = None
     lesson_format: Optional[str] = None
     goal: Optional[str] = None
+    content: Optional[dict] = None
 
 
 @app.post("/api/create")
@@ -530,6 +531,7 @@ async def api_create_block(req: CreateBlockRequest):
         blocks=req.blocks,
         lesson_format=req.lesson_format,
         goal=req.goal,
+        content=req.content,
     )
 
     level_str = f"({result.get('level', '')})" if result.get("level") else ""

@@ -91,19 +91,186 @@ CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницатель�
 2. 🌐 Свобода любых тем: Пользователь может говорить с тобой О ЧЁМ УГОДНО — о настроении, о том как прошёл день, о фильмах, жизни, методике, философии или просто перекинуться парой фраз. НИКОГДА не навязывай уроки, если человек просто общается!
 3. 🚫 Никаких дежурных анкет: Если тебя не просят прямо составить тест/упражнение, НИКОГДА не приставай с вопросами «Какой уровень CEFR: A1, A2, B1?». Будь интересным собеседником, а не бюрократом.
 4. 🛠️ Проект FigmaAI (твоя суперсила): Ты умеешь рисовать на доске Figma интерактивные квизы с самопроверкой, карточки со словами, разминки Speaking, таблицы слов с переводом и открывашки.
-5. 🚀 Создание на холсте:
-   - Если пользователь прямо говорит «нарисуй на доске...», «сделай квиз на доске...» или в процессе обсуждения вы решили перенести упражнение на холст — установи "ready_to_build": true и заполни "lesson_plan".
-   - В обычном разговоре всегда держи "ready_to_build": false и "lesson_plan": null.
-6. 🔘 Подсказки: Не спамь кнопками! Если это открытая беседа — возвращай пустой массив "suggested_replies": [].
+5. 📝 ДВУХЭТАПНОЕ СОЗДАНИЕ ЗАДАНИЙ (КРИТИЧЕСКИ ВАЖНО):
+   - Если преподаватель просит создать задание, квиз, карточки, разминку или урок (например: «Сделай квиз про животных», «Придумай разминку про хобби», «Подготовь слова на тему еда»):
+     Ты СНАЧАЛА генерируешь ПОЛНЫЙ ТЕКСТ задания прямо в чате на проверку и совместное редактирование!
+   - Формат текста в чате (поле "reply"):
+     Дружелюбное яркое вступление.
+     Затем подробный нумерованный список ВСЕХ вопросов/карточек с эмодзи:
+     1. 🐱 [Вопрос на английском]
+        - A) Вариант 1 (✅)  <-- правильный ответ ОБЯЗАТЕЛЬНО помечается галочкой (✅)
+        - B) Вариант 2
+        - C) Вариант 3
+        (Картинка: [красочное описание иллюстрации на русском или английском])
+     2. 🐘 ...
+     В конце ответа ОБЯЗАТЕЛЬНО теплое приглашение:
+     «Если всё нравится — напиши **«Делай»** (или нажми кнопку ниже), и я перенесу всё в Figma! Если хочешь что-то поменять (например, заменить вопрос или изменить варианты) — просто скажи!»
+   - При этом ты возвращаешь "ready_to_build": true и внутри "lesson_plan" обязательно заполняешь:
+     - "topic": тема задания
+     - "level": уровень (A1, A2, B1, B2, C1)
+     - "block_type": "quiz_photo" (или speaking_cards / vocabulary_table / flip_cards / fill_blanks)
+     - "title": понятный яркий заголовок задания
+     - "content": объект со структурированными вопросами/карточками (см. схему ниже), чтобы при одобрении перенести на холст РОВНО ЭТИ согласованные вопросы!
+6. ✏️ СОВМЕСТНОЕ РЕДАКТИРОВАНИЕ:
+   - Если преподаватель просит что-то изменить («замени 2-й вопрос», «сделай 4 варианта», «добавь вопрос про акулу», «сделай посложнее»):
+     Ты с радостью вносишь правки, показываешь обновлённый текст задания в чате и обновляешь "lesson_plan" с новым "content"!
+7. 🔘 Подсказки: Не спамь кнопками! Если это открытая беседа — возвращай пустой массив "suggested_replies": [].
 
 ФОРМАТ ОТВЕТА (желательно JSON, но если ты ответишь живым текстом, система тебя поймет):
 {
-  "reply": "Твой естественный, живой ответ",
+  "reply": "Твой естественный, живой ответ с полным текстом задания для проверки",
   "suggested_replies": [],
   "extracted_student_facts": null,
-  "ready_to_build": false,
-  "lesson_plan": null
+  "ready_to_build": true,
+  "lesson_plan": {
+    "topic": "Funny Animals",
+    "level": "A2",
+    "block_type": "quiz_photo",
+    "title": "🐾 Funny Animals & Superpowers Quiz",
+    "content": {
+      "title": "🐾 Funny Animals & Superpowers Quiz",
+      "topic": "Funny Animals",
+      "level": "A2",
+      "instruction": "👉 Выберите правильный вариант ответа для каждого животного.",
+      "questions": [
+        {
+          "id": 1,
+          "sentence": "Who is hiding in the box?",
+          "options": ["A sleepy cat", "A playful puppy", "A tiny hamster"],
+          "correct_index": 0,
+          "image_query": "cute fluffy ginger cat peeking out of a cardboard box",
+          "explanation": "Correct answer is A sleepy cat"
+        }
+      ]
+    }
+  }
 }"""
+
+
+def parse_draft_content_from_text(
+    reply_text: str,
+    block_type: Optional[str] = None,
+    topic: Optional[str] = None,
+    level: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Robust fallback parser: extracts questions, options, correct answers (marked with (✅)),
+    and image prompts (Картинка: ...) from the LLM chat reply text.
+    Ensures that even if the LLM outputs plain markdown, exact structured content is preserved for Figma.
+    """
+    if not reply_text or len(reply_text) < 30:
+        return None
+
+    top = topic or "English"
+    lvl = level or "A2"
+    btype = block_type or "quiz_photo"
+
+    # Detect topic from text if generic
+    if top in ("English", "Урок", None):
+        m_top = re.search(r"(?:про|тема|topic|о)\s+([а-яА-ЯёЁa-zA-Z\s]{3,25})", reply_text, re.IGNORECASE)
+        if m_top:
+            top = m_top.group(1).strip().capitalize()
+
+    # Detect level if mentioned
+    m_lvl = re.search(r"\b([A-C][1-2])\b", reply_text, re.IGNORECASE)
+    if m_lvl:
+        lvl = m_lvl.group(1).upper()
+
+    # 1. Parse Multiple Choice Quiz Questions
+    q_chunks = re.split(r"(?:\n|^)\s*(?:(?:\d{1,2}\.|\d{1,2}\)|№\s*\d{1,2}|Question\s+\d{1,2}[:.]?)\s*)", reply_text)
+    questions = []
+    opt_regex = re.compile(r"^(?:[-*•]\s*)?(?:[A-Fa-f0-9][\).:-]|\d[\).:-])\s*(.*)$")
+    img_regex = re.compile(r"(?:\(|\[)?\s*(?:Картинка|Иллюстрация|Image|Photo|Visual)\s*[:—\-]\s*([^\]\)]+)(?:\)|\])?", re.IGNORECASE)
+
+    for chunk in q_chunks[1:]:
+        lines = [line.strip() for line in chunk.strip().split("\n") if line.strip()]
+        if not lines:
+            continue
+
+        raw_sentence = lines[0]
+        # Remove leading emojis and numbering
+        sentence = re.sub(r"^[\W\d_]*[^\w\s]*\s*", "", raw_sentence).strip()
+        if not sentence:
+            sentence = raw_sentence
+
+        options = []
+        correct_idx = 0
+        image_query = ""
+
+        for line in lines[1:]:
+            m_img = img_regex.search(line)
+            if m_img:
+                image_query = m_img.group(1).strip()
+                continue
+
+            m_opt = opt_regex.match(line)
+            if m_opt:
+                opt_text = m_opt.group(1).strip()
+                is_correct = False
+                if any(marker in opt_text for marker in ("(✅)", "✅", "[x]", "[X]", "(+)", "(верно)", "(правильно)", "(correct)")):
+                    is_correct = True
+                    opt_text = re.sub(r"\s*(?:\(✅\)|✅|\[x\]|\[X\]|\(\+\)|\(верно\)|\(правильно\)|\(correct\))\s*", "", opt_text).strip()
+
+                if is_correct:
+                    correct_idx = len(options)
+                options.append(opt_text)
+
+        if len(options) >= 2:
+            correct_val = options[correct_idx] if (0 <= correct_idx < len(options)) else options[0]
+            if not image_query:
+                image_query = f"{top} {sentence[:30]} {correct_val}"
+
+            questions.append({
+                "id": len(questions) + 1,
+                "sentence": sentence,
+                "options": options,
+                "correct_index": correct_idx,
+                "image_query": image_query,
+                "explanation": f"Correct answer is {correct_val}"
+            })
+
+    if len(questions) >= 2:
+        return {
+            "title": f"🎯 {top} Quiz",
+            "topic": top,
+            "level": lvl,
+            "instruction": "👉 Выберите правильный вариант ответа для каждого задания.",
+            "questions": questions,
+            "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#quiz", "#interactive", "#esl"]
+        }
+
+    # 2. Parse Speaking Cards
+    card_chunks = re.split(r"(?:\n|^)\s*(?:(?:\d{1,2}\.|\d{1,2}\)|Card\s+\d{1,2}[:.]?)\s*)", reply_text)
+    cards = []
+    for chunk in card_chunks[1:]:
+        lines = [line.strip() for line in chunk.strip().split("\n") if line.strip()]
+        if not lines:
+            continue
+        first_line = re.sub(r"^[\W\d_]*[^\w\s]*\s*", "", lines[0]).strip() or lines[0]
+        img_q = top
+        for line in lines:
+            m_img = img_regex.search(line)
+            if m_img:
+                img_q = m_img.group(1).strip()
+                break
+        cards.append({
+            "id": len(cards) + 1,
+            "prompt": first_line,
+            "question": first_line,
+            "image_query": img_q
+        })
+
+    if len(cards) >= 2 and any(k in reply_text.lower() for k in ("speaking", "бесед", "разминк", "вопрос", "дискусс", "обсужд")):
+        return {
+            "title": f"🗣️ {top} Speaking Cards",
+            "topic": top,
+            "level": lvl,
+            "instruction": "👉 Обсудите вопросы с партнёром или преподавателем.",
+            "cards": cards,
+            "hashtags": [f"#{top.lower().replace(' ', '_')}", f"#{lvl.lower()}", "#speaking", "#discussion", "#esl"]
+        }
+
+    return None
 
 
 async def process_chat_message(
@@ -232,6 +399,37 @@ async def process_chat_message(
             "ready_to_build": False,
             "lesson_plan": None
         }
+
+    reply_str = parsed.get("reply", "")
+
+    # Robust ensure: populate lesson_plan.content from text draft if missing or fallback
+    lp = parsed.get("lesson_plan")
+    if parsed.get("ready_to_build") or lp:
+        if not isinstance(lp, dict):
+            lp = {}
+            parsed["lesson_plan"] = lp
+        top = lp.get("topic") or "English"
+        lvl = lp.get("level") or (active_student.get("level") if active_student else "A2")
+        btype = lp.get("block_type") or "quiz_photo"
+        if not lp.get("content"):
+            parsed_content = parse_draft_content_from_text(reply_str, block_type=btype, topic=top, level=lvl)
+            if parsed_content:
+                lp["content"] = parsed_content
+                if not lp.get("title"):
+                    lp["title"] = parsed_content.get("title")
+    else:
+        # Check if reply_str contains an exercise draft (questions with options)
+        parsed_content = parse_draft_content_from_text(reply_str)
+        if parsed_content and (parsed_content.get("questions") or parsed_content.get("cards")):
+            parsed["ready_to_build"] = True
+            b_type = "speaking_cards" if parsed_content.get("cards") else "quiz_photo"
+            parsed["lesson_plan"] = {
+                "title": parsed_content.get("title", "🎯 Interactive Quiz"),
+                "topic": parsed_content.get("topic", "English"),
+                "level": parsed_content.get("level", "A2"),
+                "block_type": b_type,
+                "content": parsed_content
+            }
 
     # Extract student facts and update database if found
     extracted = parsed.get("extracted_student_facts")

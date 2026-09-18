@@ -405,14 +405,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan_title = plan.get("title", f"Задание: {topic}")
         plan_level = plan.get("level")
         blocks = plan.get("blocks") or []
-        b_type = "bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo")
+        b_type = plan.get("block_type") or ("bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo"))
         student_id = plan.get("student_id") or context.user_data.get("selected_student_id")
         if student_id and not context.user_data.get("selected_student_id"):
             context.user_data["selected_student_id"] = student_id
         comments = plan.get("teacher_comments", "")
         cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
+        content = plan.get("content")
         await query.answer("Запускаю построение на доске...")
-        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
+        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level, content=content)
         return
 
     if data.startswith("chat_suggest:"):
@@ -694,34 +695,6 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
         req_tokens = max(50, int((len(user_text) + len(reply_text)) / 3) + 100)
     context.user_data["session_tokens"] = context.user_data.get("session_tokens", 0) + req_tokens
 
-    # If ready_to_build and the user explicitly ordered creation in words, start building immediately!
-    if ready_to_build and lesson_plan and is_direct_create_command(user_text):
-        topic = lesson_plan.get("topic", "Урок")
-        plan_title = lesson_plan.get("title", f"Задание: {topic}")
-        plan_level = lesson_plan.get("level")
-        blocks = lesson_plan.get("blocks") or []
-        b_type = "bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo")
-        student_id = lesson_plan.get("student_id") or context.user_data.get("selected_student_id")
-        if student_id and not context.user_data.get("selected_student_id"):
-            context.user_data["selected_student_id"] = student_id
-        comments = lesson_plan.get("teacher_comments", "")
-        cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
-        context.user_data.pop("pending_lesson_plan", None)
-        context.user_data.pop("pending_plan_time", None)
-
-        target_msg = update.message or (update.callback_query.message if update.callback_query else None)
-        if target_msg:
-            try:
-                await target_msg.reply_text(
-                    f"{reply_text}\n\n🚀 *План согласован! Начинаю генерацию и вёрстку на доске...*",
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                await target_msg.reply_text(f"{reply_text}\n\n🚀 План согласован! Начинаю генерацию и вёрстку на доске...")
-
-        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
-        return
-
     final_reply_text = reply_text
     buttons = []
 
@@ -731,10 +704,10 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
         context.user_data["pending_plan_time"] = time.time()
         topic = lesson_plan.get("topic", "Урок")
         buttons.append([InlineKeyboardButton(f"🚀 Нарисовать «{topic[:22]}» на доске", callback_data="chat_action:draw_plan")])
-        final_reply_text += "\n\n👉 *Напишите «Делай»* (или нажмите кнопку ниже), чтобы нарисовать блок на доске!"
+        final_reply_text += "\n\n👉 *Напишите «Делай»* (или нажмите кнопку ниже), чтобы нарисовать блок на доске! Либо напишите, что изменить (например, «замени 2-й вопрос»)."
     else:
-        # Clear stale plans if conversation naturally moved to another subject
-        if context.user_data.get("pending_plan_time") and (time.time() - context.user_data["pending_plan_time"] > 300):
+        # Clear stale plans if conversation naturally moved to another subject (10 min TTL)
+        if context.user_data.get("pending_plan_time") and (time.time() - context.user_data["pending_plan_time"] > 600):
             context.user_data.pop("pending_lesson_plan", None)
             context.user_data.pop("pending_plan_time", None)
 
@@ -774,9 +747,11 @@ def is_confirmation_phrase(text: str) -> bool:
 
     action_affirmatives = {
         "делай", "давай", "рисуй", "создавай", "погнали", "поехали", "го", "go",
-        "запускай", "стартуй", "начинай", "делайте", "давайте", "рисуйте", "создавайте", "действуй"
+        "запускай", "стартуй", "начинай", "делайте", "давайте", "рисуйте", "создавайте", "действуй",
+        "переноси", "переноси в фигму", "переноси на доску", "на холст", "в фигму", "рисуем", "делаем",
+        "согласовано", "одобряю", "огонь", "класс", "добро", "принято"
     }
-    # Direct action verb ("делай", "давай", "рисуй", "погнали")
+    # Direct action verb ("делай", "давай", "рисуй", "погнали", "переноси в фигму")
     if any(w in action_affirmatives for w in words):
         return True
 
@@ -787,52 +762,25 @@ def is_confirmation_phrase(text: str) -> bool:
     return False
 
 
-def is_direct_create_command(text: str) -> bool:
+def is_explicit_bypass_draw_command(text: str) -> bool:
     """
-    Check if teacher explicitly commands to create/draw a specific ESL block on the Figma canvas.
-    Distinguishes direct imperative commands from general questions or conversational discussion.
+    Check if teacher explicitly requests to skip textual preview and draw directly to canvas immediately.
+    Standard requests ('Сделай квиз...', 'Создай карточки...') are NOT bypass commands and MUST show text draft first!
     """
     lower = text.lower().strip()
+    if lower.startswith("/draw_now") or lower.startswith("/create_now"):
+        return True
 
-    # If it's a question or discussion ("как сделать...", "почему...", "стоит ли...", "подскажи..."), it is NOT a direct create command!
-    discussion_prefixes = (
-        "как", "почему", "зачем", "стоит ли", "можно ли", "что если",
-        "подскажи", "посоветуй", "помоги", "расскажи", "объясни", "что думаешь", "как думаешь"
+    bypass_phrases = (
+        "без проверки", "без согласования", "без текста",
+        "сразу нарисуй на доске", "сразу создай на доске", "сразу нарисуй", "сразу создай",
+        "сразу на доску", "сразу на холст", "сразу в фигму", "сразу на доске"
     )
-    if any(lower.startswith(p) for p in discussion_prefixes):
-        return False
-    if lower.endswith("?") and not any(lower.startswith(p) for p in ("нарисуй", "создай", "сделай на доске")):
-        return False
+    return any(p in lower for p in bypass_phrases)
 
-    cleaned = re.sub(
-        r"^(?:привет|здравствуй(?:те)?|добрый\s+(?:день|вечер|утро)|хай|хей|hello|hi|слушай(?:те)?|пожалуйста|бот|эй|можешь(?:\s+пожалуйста)?)\s*[,!.:-]*\s*",
-        "",
-        lower
-    ).strip()
 
-    # Explicit canvas drawing prefixes
-    board_prefixes = (
-        "/draw_now", "/create_now",
-        "нарисуй на доске", "нарисуй на холсте", "нарисуй",
-        "создай на доске", "создай на холсте", "создай",
-        "сделай на доске", "сделай на холсте",
-        "сгенерируй на доске", "сгенерируй на холсте", "сгенерируй",
-        "закинь на доску", "закинь на холст", "закинь",
-        "построй на доске", "построй",
-        "накидай на доску", "накидай быстренько", "накидай",
-        "подготовь на доске", "собери на доске"
-    )
-    block_markers = (
-        "квиз", "quiz", "тест", "открываш", "peekaboo", "flip", "карточк", "флешкарт",
-        "flashcard", "словар", "vocab", "слов", "пропуск", "fill", "разминк", "warmup",
-        "speaking", "говор", "урок", "заняти", "lesson", "блум", "bloom"
-    )
-
-    if any(lower.startswith(p) or cleaned.startswith(p) for p in board_prefixes):
-        if any(marker in lower for marker in block_markers):
-            return True
-
-    return False
+# Backward compatibility alias
+is_direct_create_command = is_explicit_bypass_draw_command
 
 
 def is_status_query(text: str) -> bool:
@@ -929,7 +877,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # 2.4 Check if teacher confirms pending lesson plan
     pending_plan = context.user_data.get("pending_lesson_plan")
     plan_time = context.user_data.get("pending_plan_time", 0)
-    is_fresh_plan = (time.time() - plan_time) < 300  # Valid for 5 minutes
+    is_fresh_plan = (time.time() - plan_time) < 600  # Valid for 10 minutes
 
     if pending_plan and is_fresh_plan and is_confirmation_phrase(text):
         context.user_data.pop("pending_lesson_plan", None)
@@ -938,17 +886,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         plan_title = pending_plan.get("title", f"Задание: {topic}")
         plan_level = pending_plan.get("level")
         blocks = pending_plan.get("blocks") or []
-        b_type = "bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo")
+        b_type = pending_plan.get("block_type") or ("bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo"))
         student_id = pending_plan.get("student_id") or context.user_data.get("selected_student_id")
         if student_id and not context.user_data.get("selected_student_id"):
             context.user_data["selected_student_id"] = student_id
         comments = pending_plan.get("teacher_comments", "")
         cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
+        content = pending_plan.get("content")
         clean_text = text.strip().lower()
-        if len(text.strip()) > 15 and clean_text not in ("делай", "давай", "рисуй", "создавай", "погнали"):
+        if len(text.strip()) > 15 and clean_text not in ("делай", "давай", "рисуй", "создавай", "погнали", "переноси"):
             cmd_text += f". Пожелания: {text.strip()}"
 
-        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
+        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level, content=content)
         return
     elif pending_plan and not is_fresh_plan:
         # Clear expired plan
@@ -998,11 +947,11 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Check if there is a pending block type from button selection
     pending_btype = context.user_data.pop("pending_block_type", None)
     if pending_btype:
-        await execute_creation(update, context, command=text, block_type=pending_btype)
+        await process_chat_interaction(update, context, f"Создай интерактивный блок «{pending_btype}» на тему: {text}")
         return
 
-    # Check for direct draw commands in words (e.g. "нарисуй на доске квиз...", "/draw_now ...")
-    if is_direct_create_command(text):
+    # Check for explicit bypass draw commands (e.g. "/draw_now ...", "сразу на доске без проверки")
+    if is_explicit_bypass_draw_command(text):
         await execute_creation(update, context, command=text)
         return
 
@@ -1128,7 +1077,8 @@ async def execute_creation(
     command: str = "",
     block_type: Optional[str] = None,
     topic: Optional[str] = None,
-    level: Optional[str] = None
+    level: Optional[str] = None,
+    content: Optional[Dict[str, Any]] = None
 ):
     if not bridge.is_connected():
         msg_text = "❌ *Плагин Figma офлайн.* Запустите плагин на доске FigJam / Figma."
@@ -1169,6 +1119,7 @@ async def execute_creation(
             board_id=bid,
             level=level,
             images=staged_photos,
+            content=content,
         )
 
         if result.get("ok"):

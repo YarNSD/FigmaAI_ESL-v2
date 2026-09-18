@@ -645,14 +645,16 @@ async def process_command(
     blocks: list = None,
     lesson_format: str = None,
     goal: str = None,
+    content: dict = None,
 ) -> dict:
     """
     Main entry point. Accepts either:
     - A natural language command (parsed automatically)
     - Explicit params (block_type, topic, level, count)
+    - Pre-approved content dict directly from two-stage conversational preview
     Returns a result dict with ok, message, and optional clarification prompt.
     """
-    logger.info(f"process_command: '{command}' bt={block_type} topic={topic} level={level} sel={selection} has_img={bool(image_base64)} imgs_cnt={len(images) if images else 0}")
+    logger.info(f"process_command: '{command}' bt={block_type} topic={topic} level={level} has_content={bool(content)} sel={selection} has_img={bool(image_base64)} imgs_cnt={len(images) if images else 0}")
 
     if block_type in ("auto", "undefined", "none", "None", ""):
         block_type = None
@@ -667,6 +669,8 @@ async def process_command(
         if not student_name: student_name = lesson_plan.get("student_name")
         if not images and lesson_plan.get("staged_photos"):
             images = lesson_plan.get("staged_photos")
+        if not content and lesson_plan.get("content"):
+            content = lesson_plan.get("content")
 
     # ── 0. Vision Agent: Batch Images or Canvas Image ──────────────────
     vision_context = None
@@ -905,7 +909,26 @@ async def process_command(
         message=f"Составляю вопросы, лексику и отвлекающие варианты по стандарту CEFR {lv}..."
     )
     try:
-        if bt == "quiz_photo":
+        if content and isinstance(content, dict):
+            logger.info(f"Using pre-approved content for {bt}: {content.get('title')}")
+            no_images = any(k in (command or "").lower() for k in [
+                "без картинок", "без фото", "без иллюстраций", "без изображений",
+                "no image", "no photo", "text only", "только текст"
+            ])
+            wants_images = not no_images
+            content.setdefault("has_images", wants_images)
+            content.setdefault("image_mode", detected_img_mode)
+            content.setdefault("is_sticker", is_sticker)
+            content.setdefault("is_child", is_child)
+            content.setdefault("level", lv)
+            content.setdefault("topic", tp)
+            if not content.get("title"):
+                content["title"] = f"🎯 {tp} {BLOCK_TYPES.get(bt, bt)}"
+            if not content.get("hashtags"):
+                content["hashtags"] = [f"#{tp.lower().replace(' ', '_')}", f"#{lv.lower()}", "#esl", f"#{bt}"]
+            if vision_context and vision_context.get("image_base64") and not content.get("canvas_image_base64"):
+                content["canvas_image_base64"] = vision_context["image_base64"]
+        elif bt == "quiz_photo":
             # Images are ON by default — only disable if user explicitly says so
             no_images = any(k in (command or "").lower() for k in [
                 "без картинок", "без фото", "без иллюстраций", "без изображений",
