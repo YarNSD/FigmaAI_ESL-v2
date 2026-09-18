@@ -104,7 +104,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 text=True,
                 encoding="utf-8",
                 env=env,
-                timeout=25,
+                timeout=50,
                 stdin=subprocess.DEVNULL,
                 **kwargs
             )

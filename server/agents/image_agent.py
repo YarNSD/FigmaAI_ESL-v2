@@ -77,14 +77,17 @@ def _clean_query(raw_query: str, topic: str = "") -> str:
     return clean.strip()
 
 
-async def _search_pinterest(query: str, client: httpx.AsyncClient) -> bytes | None:
+async def _search_pinterest(query: str, client: httpx.AsyncClient, is_sticker: bool = False) -> bytes | None:
     """Search Pinterest for high-quality, aesthetic, contextually relevant images.
     Uses indexed Pinterest pins via high-speed image search with i.pinimg.com extraction.
     Strictly filters out stock watermarks (Shutterstock, iStock, Alamy, etc.).
     """
     try:
         clean_q = _clean_query(query)
-        encoded = urllib.parse.quote_plus(f"{clean_q} site:pinterest.com")
+        if is_sticker:
+            encoded = urllib.parse.quote_plus(f"{clean_q} cute kawaii cartoon sticker png -watermark site:pinterest.com")
+        else:
+            encoded = urllib.parse.quote_plus(f"{clean_q} site:pinterest.com")
         url = f"https://yandex.com/images/search?text={encoded}"
         resp = await client.get(url, timeout=5.5)
         if resp.status_code != 200:
@@ -280,19 +283,30 @@ async def _generate_pollinations(
     query: str,
     client: httpx.AsyncClient,
     topic: str = "",
-    is_child: bool = False
+    is_child: bool = False,
+    is_sticker: bool = False
 ) -> bytes | None:
     """Generate a unique AI illustration via Pollinations AI with rate-limit guard.
-    - If is_child: playful cartoons/stickers (cats, dinosaurs, lego characters, friendly mascots).
+    - If is_sticker: playful kawaii cartoon character stickers with die-cut white outline (Screenshot 2 style).
+    - If is_child: playful colorful cartoons/stickers.
     - If adult: modern, clean, editorial educational visuals.
     """
     global _LAST_POLLINATIONS_TIME
 
-    if is_child:
-        # Child style: Cute cartoon, kawaii, sticker with die-cut white outline, cats/dinosaurs/lego vibe
+    if is_sticker:
+        # User Rule / Screenshot 2 Style: Cute kawaii cartoon character sticker with thick clean white die-cut border
+        enhanced_prompt = (
+            f"Cute colorful kawaii cartoon sticker illustration of {query}, "
+            f"playful adorable mascot, bold clean thick white die-cut sticker border outline, "
+            f"vibrant cheerful colors, smooth clean vector clipart, soft modern cell-shading, "
+            f"chibi aesthetic with expressive joyful eyes, isolated on solid pastel background or pure white background, "
+            f"high quality sticker pack asset, vector clipart, 4k"
+        )
+    elif is_child:
+        # Child style: Cute cartoon, kawaii, sticker with die-cut white outline, playful mascot
         enhanced_prompt = (
             f"Cute colorful cartoon sticker illustration of {query}, "
-            f"playful child-friendly character style (cat or dinosaur or lego or cute mascot), "
+            f"playful child-friendly character style, "
             f"thick clean white die-cut outline border, bright cheerful pastel colors, "
             f"expressive kawaii art, isolated on pure white background, premium vector children book illustration, 4k"
         )
@@ -348,45 +362,24 @@ def _generate_svg_placeholder(query: str) -> bytes:
     return svg.encode("utf-8")
 
 
-async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto", is_child: bool = False) -> str:
+async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto", is_child: bool = False, is_sticker: bool = False) -> str:
     """
     Get Base64 image data for a query.
 
     image_mode:
-      'search'   — search Wikimedia + Openverse, fallback to AI generation if none found.
-      'generate' — AI generation (Pollinations), GUARANTEED fallback to Wikimedia Commons so no image is ever empty.
-      'auto'     — tries AI generation first, fallback to Wikimedia Commons.
+      'sticker'  — kawaii cartoon character stickers with die-cut white outline (Screenshot 2 style).
+      'search'   — search Pinterest / Wikimedia / Openverse, fallback to AI generation if none found.
+      'generate' — AI generation (Pollinations), GUARANTEED fallback to Pinterest / Wikimedia Commons.
+      'auto'     — smart strategy: if is_sticker -> AI generation first, else Pinterest photo first.
     """
     if not query or not query.strip():
         return ""
 
-    # Cache key includes mode and is_child so 'generate' and 'search' don't share cached results
+    # Cache key includes mode, is_child and is_sticker
     cleaned = _clean_query(query, topic)
-    cache_key = f"{image_mode}:{is_child}:{cleaned}"
+    cache_key = f"{image_mode}:{is_child}:{is_sticker}:{cleaned}"
     if cache_key in _IMAGE_CACHE:
         return _IMAGE_CACHE[cache_key]
-
-    # Check local pre-generated assets (e.g. from built-in Google Imagen)
-    local_dirs = [
-        Path(r"c:\Users\Admin\FigmaAI\assets\quiz_images"),
-        Path(r"c:\Users\Admin\FigmaAI\assets"),
-        Path(r"C:\Users\Admin\.gemini\antigravity-ide\brain\875e0877-b807-47a8-8e3c-a2c3f00e9eb5"),
-    ]
-    query_words = [w.lower() for w in cleaned.split() if len(w) > 3]
-    for ldir in local_dirs:
-        if ldir.exists():
-            for f in ldir.glob("*.jpg"):
-                fname = f.stem.lower()
-                if any(qw in fname for qw in query_words):
-                    try:
-                        raw = f.read_bytes()
-                        if len(raw) > 5000:
-                            logger.info(f"💾 ImageAgent: Using built-in local asset {f.name} for '{cleaned}'")
-                            b64 = base64.b64encode(raw).decode("ascii")
-                            _IMAGE_CACHE[cache_key] = b64
-                            return b64
-                    except Exception:
-                        pass
 
     proxy = _detect_proxy()
     transport_kwargs = {"proxy": proxy} if proxy else {}
@@ -394,10 +387,20 @@ async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto"
     raw_bytes = None
     try:
         async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, **transport_kwargs) as client:
-            if image_mode in ("search", "pinterest"):
+            if is_sticker or image_mode == "sticker":
+                # Sticker mode: AI generation FIRST with die-cut cartoon sticker prompt, then Pinterest sticker fallback
+                logger.info(f"🎨 ImageAgent [STICKER mode]: generating kawaii sticker illustration of '{cleaned}'")
+                raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=True)
+                if not raw_bytes:
+                    logger.info(f"AI sticker generation unavailable for '{cleaned}', searching Pinterest stickers")
+                    raw_bytes = await _search_pinterest(cleaned, client, is_sticker=True)
+                if not raw_bytes:
+                    raw_bytes = await _search_openverse(f"{cleaned} cartoon sticker clipart", client)
+
+            elif image_mode in ("search", "pinterest"):
                 # Real internet photos: User explicitly wants Pinterest as primary source
                 logger.info(f"📌 ImageAgent [{image_mode.upper()} mode]: searching Pinterest for '{cleaned}'")
-                raw_bytes = await _search_pinterest(cleaned, client)
+                raw_bytes = await _search_pinterest(cleaned, client, is_sticker=is_sticker)
                 if not raw_bytes:
                     logger.info(f"Pinterest photo not found for '{cleaned}', falling back to Wikimedia/Openverse")
                     raw_bytes = await _search_wikimedia(cleaned, client)
@@ -405,28 +408,33 @@ async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto"
                     raw_bytes = await _search_openverse(cleaned, client)
                 if not raw_bytes:
                     logger.info(f"Web search failed for '{cleaned}', trying AI generation")
-                    raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child)
+                    raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=is_sticker)
 
             elif image_mode == "generate":
                 # Explicit generative illustrations
-                logger.info(f"🎨 ImageAgent [GENERATE mode]: generating illustration of '{cleaned}' (child={is_child})")
-                raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child)
+                logger.info(f"🎨 ImageAgent [GENERATE mode]: generating illustration of '{cleaned}' (child={is_child}, sticker={is_sticker})")
+                raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=is_sticker)
                 if not raw_bytes:
                     logger.info(f"AI generation unavailable for '{cleaned}', falling back to Pinterest")
-                    raw_bytes = await _search_pinterest(cleaned, client)
+                    raw_bytes = await _search_pinterest(cleaned, client, is_sticker=is_sticker)
                 if not raw_bytes:
                     raw_bytes = await _search_wikimedia(cleaned, client)
 
-            else:  # "auto" — smart dual strategy: try Pinterest first for real, aesthetic photos; fallback to AI
-                logger.info(f"✨ ImageAgent [AUTO mode]: searching Pinterest for '{cleaned}'")
-                raw_bytes = await _search_pinterest(cleaned, client)
-                if not raw_bytes:
-                    logger.info(f"Pinterest empty for '{cleaned}', generating via Pollinations AI")
-                    raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child)
-                if not raw_bytes:
-                    raw_bytes = await _search_wikimedia(cleaned, client)
-                if not raw_bytes:
-                    raw_bytes = await _search_openverse(cleaned, client)
+            else:  # "auto" — smart dual strategy: stickers try AI first; regular photos try Pinterest first
+                if is_sticker:
+                    raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=True)
+                    if not raw_bytes:
+                        raw_bytes = await _search_pinterest(cleaned, client, is_sticker=True)
+                else:
+                    logger.info(f"✨ ImageAgent [AUTO mode]: searching Pinterest for '{cleaned}'")
+                    raw_bytes = await _search_pinterest(cleaned, client, is_sticker=False)
+                    if not raw_bytes:
+                        logger.info(f"Pinterest empty for '{cleaned}', generating via Pollinations AI")
+                        raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=False)
+                    if not raw_bytes:
+                        raw_bytes = await _search_wikimedia(cleaned, client)
+                    if not raw_bytes:
+                        raw_bytes = await _search_openverse(cleaned, client)
 
     except Exception as e:
         logger.error(f"ImageAgent error resolving '{query}': {e}")
@@ -462,30 +470,33 @@ async def resolve_batch_images(
     item_query_key: str = "image_query",
     image_mode: str = "auto",
     is_child: bool = False,
+    is_sticker: bool = False,
 ) -> list[dict]:
     """
     Resolve images for a batch of cards/questions concurrently for high speed.
-    image_mode: 'generate' | 'search' | 'auto'
+    image_mode: 'sticker' | 'generate' | 'search' | 'auto'
     """
     if not items:
         return items
 
     mode_labels = {
+        "sticker":  "🐱 Стикеры (Kawaii Die-cut Outline)",
         "generate": "🎨 AI-генерация + Быстрый поиск",
         "search":   "🔍 Поиск фото (Wikimedia / Openverse)",
-        "auto":     "✨ Авто: AI + Wikimedia",
+        "auto":     "✨ Авто: AI + Pinterest",
     }
     total = len(items)
+    effective_mode = "sticker" if is_sticker else image_mode
     agent_logger.emit_log(
         stage="generating",
         icon="🖼️",
         title="Image Agent в работе",
-        message=f"Режим: {mode_labels.get(image_mode, image_mode)} | Всего {total} картинок...",
-        detail=f"Тема: {topic} (детский стиль: {'да' if is_child else 'нет'})"
+        message=f"Режим: {mode_labels.get(effective_mode, effective_mode)} | Всего {total} картинок...",
+        detail=f"Тема: {topic} (стикеры/мультяшный: {'да' if is_sticker else ('да (детский)' if is_child else 'нет')})"
     )
 
-    # Concurrency semaphore to avoid overwhelming connections while being 5x faster
-    sem = asyncio.Semaphore(3)
+    # Concurrency semaphore to avoid overwhelming connections while being fast
+    sem = asyncio.Semaphore(2 if is_sticker else 3)
 
     async def _resolve_single(idx: int, item: dict) -> dict:
         # If item already has image_base64 (e.g. from canvas selection / Vision Agent), preserve it
@@ -494,8 +505,8 @@ async def resolve_batch_images(
 
         query = item.get(item_query_key) or item.get("question") or item.get("sentence") or item.get("word") or topic
         async with sem:
-            logger.info(f"ImageAgent [{image_mode}] [{idx}/{total}]: '{query}'")
-            b64 = await get_image_base64(query, topic=topic, image_mode=image_mode, is_child=is_child)
+            logger.info(f"ImageAgent [{effective_mode}] [{idx}/{total}]: '{query}'")
+            b64 = await get_image_base64(query, topic=topic, image_mode=effective_mode, is_child=is_child, is_sticker=is_sticker)
             if b64:
                 return {**item, "image_base64": b64}
             return {**item, "image_base64": ""}
@@ -520,18 +531,18 @@ async def resolve_batch_images(
         stage="generating",
         icon="✅",
         title="Иллюстрации готовы",
-        message=f"Image Agent успешно подготовил {success_count} из {total} картинок! (режим: {image_mode})",
+        message=f"Image Agent успешно подготовил {success_count} из {total} картинок! (режим: {effective_mode})",
         detail="Все изображения конвертированы в векторные растровые слои Figma"
     )
 
     return updated_items
 
 
-async def get_quiz_images(queries: list[str], topic: str = "", image_mode: str = "auto", is_child: bool = False) -> list[str]:
+async def get_quiz_images(queries: list[str], topic: str = "", image_mode: str = "auto", is_child: bool = False, is_sticker: bool = False) -> list[str]:
     """
     Resolve a list of search/generation queries to a list of base64 strings.
     Guarantees matching order and non-empty fallback.
     """
     items = [{"query": q} for q in queries]
-    resolved = await resolve_batch_images(items, topic=topic, item_query_key="query", image_mode=image_mode, is_child=is_child)
+    resolved = await resolve_batch_images(items, topic=topic, item_query_key="query", image_mode=image_mode, is_child=is_child, is_sticker=is_sticker)
     return [it.get("image_base64", "") for it in resolved]

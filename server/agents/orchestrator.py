@@ -58,16 +58,18 @@ def _detect_image_mode(command: str) -> str:
     """
     Detect what image sourcing mode the user wants based on command text.
 
-    User rule 1A: Search web images ONLY if explicitly requested in the prompt.
-    Otherwise use AI generation ('generate') or smart default.
-
     Returns:
+      'sticker'  — kawaii cartoon character stickers with die-cut white outline (Screenshot 2 style)
       'search'   — user explicitly asked to find/search photos on the web
       'generate' — AI generation (Pollinations stickers/illustrations)
     """
     if not command:
         return "generate"
     cmd = command.lower()
+
+    # Keywords meaning: cartoon character stickers (User Screenshot 2 aesthetic)
+    if any(k in cmd for k in ["стикер", "наклейк", "мультяш", "мультик", "комикс", "cartoon", "sticker", "kawaii", "аниме"]):
+        return "sticker"
 
     # Keywords meaning: explicitly search the web for photos
     search_kw = [
@@ -252,6 +254,7 @@ async def generate_full_lesson(
     sub_blocks = []
 
     is_child = (int(student_age) <= 14 if str(student_age).isdigit() else False) or "ребенок" in full_ctx_str or "дети" in full_ctx_str
+    is_sticker = (_detect_image_mode(command) == "sticker") or any(k in full_ctx_str for k in ["стикер", "мультяш", "наклейк", "cartoon", "sticker", "kawaii"])
 
     # Extract custom quantities if specified by teacher in command or history
     m_quiz_count = re.search(r"(?:квиз\w*|вопрос\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
@@ -324,14 +327,14 @@ async def generate_full_lesson(
                     cnt["image_mode"] = "generate"
                     questions = cnt.get("questions", [])
                     queries = [q.get("image_query", q.get("question", q.get("sentence", ""))) for q in questions]
-                    images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child)
+                    images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child, is_sticker=is_sticker)
                     for q, img in zip(questions, images_b64):
                         q["image_base64"] = img
                     cnt["questions"] = questions
                 elif b_type == "speaking_cards" and is_child:
                     cards = cnt.get("cards", [])
                     queries = [f"{c.get('question', '')} {topic}" for c in cards]
-                    imgs = await image_agent.get_quiz_images(queries, topic=topic, is_child=True)
+                    imgs = await image_agent.get_quiz_images(queries, topic=topic, is_child=True, is_sticker=is_sticker)
                     for c, img in zip(cards, imgs):
                         if img:
                             c["image_base64"] = img
@@ -474,7 +477,7 @@ async def generate_full_lesson(
                     cnt["bloom_color"] = b_color
                     questions = cnt.get("questions", [])
                     queries = [q.get("image_query", q.get("question", "")) for q in questions]
-                    images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child)
+                    images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child, is_sticker=is_sticker)
                     for q, img in zip(questions, images_b64):
                         q["image_base64"] = img
                     cnt["questions"] = questions
@@ -884,6 +887,17 @@ async def process_command(
         )
 
     # --- Step 2: Generate content ---
+    from server.agents import chat_agent
+    hist = chat_agent.get_shared_history()
+    full_ctx_str = (str(command or "") + " " + " ".join(m.get("content", "") for m in hist)).lower()
+
+    st_id = params.get("student_id") or params.get("student_name") or student_id or student_name
+    student = student_agent.get_student(st_id) if st_id else None
+    student_age = student.get("age", "") if student else ""
+    is_child = (int(student_age) <= 14 if str(student_age).isdigit() else False) or "ребенок" in full_ctx_str or "дети" in full_ctx_str
+    detected_img_mode = _detect_image_mode(command)
+    is_sticker = (detected_img_mode == "sticker") or any(k in full_ctx_str for k in ["стикер", "мультяш", "наклейк", "cartoon", "sticker", "kawaii"])
+
     agent_logger.emit_log(
         stage="generating",
         icon="📝",
@@ -899,13 +913,22 @@ async def process_command(
             ])
             wants_images = not no_images  # DEFAULT = True (always include images)
             cnt = max(int(cnt or 10), 10)
-            content = await content_agent.generate_quiz_photo(tp, lv, cnt, vision_context=vision_context)
+
+            # Detect options count if specified (e.g. 3 варианта, 5 вариантов, 3 options, 5 options)
+            m_opts = re.search(r"(\d)\s*(?:вариант\w*|ответ\w*|options?)", full_ctx_str)
+            opts_cnt = int(m_opts.group(1)) if (m_opts and 2 <= int(m_opts.group(1)) <= 6) else None
+
+            content = await content_agent.generate_quiz_photo(tp, lv, cnt, vision_context=vision_context, options_count=opts_cnt)
             content["has_images"] = wants_images
-            content["image_mode"] = _detect_image_mode(command)
+            content["image_mode"] = detected_img_mode
+            content["is_sticker"] = is_sticker
+            content["is_child"] = is_child
             if vision_context and vision_context.get("image_base64"):
                 content["canvas_image_base64"] = vision_context["image_base64"]
         elif bt == "flip_cards":
             content = await content_agent.generate_flip_cards(tp, lv, cnt, vision_context=vision_context)
+            content["is_sticker"] = is_sticker
+            content["is_child"] = is_child
             if vision_context and vision_context.get("image_base64"):
                 content["canvas_image_base64"] = vision_context["image_base64"]
         elif bt == "video_quiz":
@@ -914,7 +937,9 @@ async def process_command(
             content = await content_agent.generate_video_quiz(yt, tp, lv, cnt)
         elif bt == "vocabulary_table":
             content = await content_agent.generate_vocabulary_table(tp, lv, cnt, vision_context=vision_context)
-            content["image_mode"] = _detect_image_mode(command)
+            content["image_mode"] = detected_img_mode
+            content["is_sticker"] = is_sticker
+            content["is_child"] = is_child
         elif bt == "flashcards":
             content = await content_agent.generate_flashcards(tp, lv, cnt)
         elif bt == "fill_blanks":
@@ -922,6 +947,8 @@ async def process_command(
             content = await content_agent.generate_fill_blanks(tp, lv, cnt, vision_context=vision_context)
         elif bt == "speaking_cards":
             content = await content_agent.generate_speaking_cards(tp, lv, cnt, vision_context=vision_context)
+            content["is_sticker"] = is_sticker
+            content["is_child"] = is_child
         else:
             return {"ok": False, "message": f"Unknown block type: {bt}"}
 

@@ -15,10 +15,10 @@ from server.agents import content_fallback
 logger = logging.getLogger("content_agent")
 
 
-def _normalize_and_shuffle_quiz_questions(questions: list) -> list:
+def _normalize_and_shuffle_quiz_questions(questions: list, target_options_count: int = None) -> list:
     """
-    Ensures every question has exactly 4 options and that options are uniformly randomized.
-    Updates correct_index to point to the new shuffled position so option 1 is not constant.
+    Ensures quiz questions have a uniform, valid set of options (e.g. 3, 4, or 5) and randomizes their order.
+    Preserves correct answer and updates correct_index.
     """
     natural_distractors = [
         "Take a break", "Prepare breakfast", "Check emails", "Set an alarm",
@@ -31,23 +31,24 @@ def _normalize_and_shuffle_quiz_questions(questions: list) -> list:
             str(o).strip() for o in q.get("options", [])
             if str(o).strip() and not re.search(r"^(none|all) of the above", str(o).strip(), re.IGNORECASE)
         ]
+        desired_cnt = target_options_count if target_options_count else (len(opts) if len(opts) in (2, 3, 4, 5, 6) else 4)
         orig_idx = q.get("correct_index", 0)
         if not (0 <= orig_idx < len(opts)):
             orig_idx = 0
         correct_answer = opts[orig_idx] if opts else "Correct Option"
 
-        # Ensure we have at least 4 options
+        # If too few options, add natural distractors
         d_idx = 0
-        while len(opts) < 4:
+        while len(opts) < desired_cnt:
             cand = natural_distractors[d_idx % len(natural_distractors)]
             d_idx += 1
             if cand not in opts:
                 opts.append(cand)
 
-        # If more than 4, trim distractors while preserving correct answer
-        if len(opts) > 4:
+        # If too many options, trim distractors while preserving correct answer
+        if len(opts) > desired_cnt:
             other_opts = [o for i, o in enumerate(opts) if i != orig_idx]
-            opts = [correct_answer] + other_opts[:3]
+            opts = [correct_answer] + other_opts[:desired_cnt - 1]
 
         # Shuffle options randomly
         random.shuffle(opts)
@@ -112,23 +113,27 @@ async def generate_quiz_photo(
     count: int = 10,
     vision_context: dict | None = None,
     bloom_level: str | None = None,
-    bloom_instructions: str | None = None
+    bloom_instructions: str | None = None,
+    options_count: int = None
 ) -> dict:
     """
     Generate a photo-based quiz (type 1 from screenshots).
     Returns structured JSON with questions, options, correct answers.
-    Enforces minimum of 10 questions per user requirements.
+    Supports customizable options count (e.g. 3, 4, 5 options).
     Supports Bloom's taxonomy cognitive levels (e.g. ANALYZE for error hunting / odd-one-out).
     """
     # Enforce minimum 10 questions for ESL quizzes
     count = max(int(count or 10), 10)
+    opt_cnt = options_count if (options_count and 2 <= options_count <= 6) else 4
+    example_opts = [f"Option {i}" for i in range(1, opt_cnt + 1)]
+    opts_example_str = json.dumps(example_opts)
 
     # If vision agent already extracted questions directly from the worksheet / image:
     if vision_context and vision_context.get("questions") and len(vision_context["questions"]) >= 3:
         v_qs = vision_context["questions"]
         formatted_questions = []
         for idx, q in enumerate(v_qs[:count], 1):
-            opts = q.get("options", ["A", "B", "C", "D"])
+            opts = q.get("options", example_opts)
             correct_val = q.get("correct")
             correct_idx = 0
             if correct_val in opts:
@@ -142,7 +147,7 @@ async def generate_quiz_photo(
                 "explanation": q.get("explanation") or f"Correct answer is {correct_val}"
             })
         
-        formatted_questions = _normalize_and_shuffle_quiz_questions(formatted_questions)
+        formatted_questions = _normalize_and_shuffle_quiz_questions(formatted_questions, target_options_count=opt_cnt)
         title = vision_context.get("topic") or vision_context.get("worksheet_title") or f"🎯 {topic} Interactive Quiz"
         instruction = vision_context.get("instruction") or "Выберите правильный вариант ответа для каждого задания по картинке."
         logger.info(f"✅ Generated quiz directly from Vision Agent: {title} ({len(formatted_questions)} questions)")
@@ -182,8 +187,8 @@ Return JSON in this EXACT format:
       "id": 1,
       "image_query": "2-4 word Wikipedia-searchable English noun phrase for this question's key concept. Must be a concrete THING or SCENE visible in a photo (e.g. 'yellow card football', 'cat sleeping sofa', 'library bookshelves'). NOT abstract words like 'grammar', 'verb', 'language'. Topic context MUST be included.",
       "sentence": "Sentence with ___ gap OR question text",
-      "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
-      "correct_index": 2,
+      "options": {opts_example_str},
+      "correct_index": 0,
       "explanation": "Brief explanation why this is correct (in English)"
     }}
   ],
@@ -192,11 +197,11 @@ Return JSON in this EXACT format:
 
 Generate exactly {count} questions. Make them varied and educational.
 CRITICAL RULES FOR OPTIONS:
-1. Every question MUST have EXACTLY 4 options (Option 1, Option 2, Option 3, Option 4).
+1. Every question MUST have EXACTLY {opt_cnt} options ({", ".join(example_opts)}).
 2. Do NOT include 'A)', 'B)', 'C)', 'D)' prefixes in the options array — only the text.
-3. RANDOMIZE the correct answer index across questions (e.g. questions have correct_index = 0, 1, 2, 3 in random order). NEVER make option 1 / index 0 always the correct answer!
+3. RANDOMIZE the correct answer index across questions (e.g. questions have correct_index = 0, 1, 2... in random order). NEVER make option 1 / index 0 always the correct answer!
 4. Each image_query must be a specific, concrete, photo-searchable English phrase related to BOTH the question AND the topic '{topic}'.
-5. NEVER generate robotic fillers like 'None of the above', 'All of the above', or 'Not mentioned'. All 4 options must be authentic, plausible English words or phrases."""
+5. NEVER generate robotic fillers like 'None of the above', 'All of the above', or 'Not mentioned'. All options must be authentic, plausible English words or phrases."""
 
     if not (config.is_ai_ready() and ai_engine.is_antigravity_cli_authenticated()):
         logger.info(f"AI engine offline/unauthenticated, using educational fallback for quiz: {topic}")
@@ -221,8 +226,8 @@ CRITICAL RULES FOR OPTIONS:
             if len(data["questions"]) >= count:
                 break
 
-    # Normalize to exactly 4 options and shuffle options so answer position is truly randomized
-    data["questions"] = _normalize_and_shuffle_quiz_questions(data["questions"])
+    # Normalize options and shuffle so answer position is truly randomized
+    data["questions"] = _normalize_and_shuffle_quiz_questions(data["questions"], target_options_count=opt_cnt)
 
     # If canvas image was provided, attach user's image to questions
     if vision_context and vision_context.get("image_base64"):

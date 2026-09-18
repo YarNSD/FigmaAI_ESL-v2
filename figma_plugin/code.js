@@ -2438,13 +2438,61 @@ async function drawESLQuizPhoto(params) {
   nodes.push(instr);
   nodes.push(_eslMakeText('👉 ' + (instruction || 'Choose the correct answer!'), BX + PAD + 16, instrY + 12, BLOCK_W - PAD * 2 - 32, 28, '#1e293b', 16, 'Medium'));
 
-  // Questions Grid (2 Columns compact layout)
+  // Dynamic Grid Layout: Calculate required heights for each question and each row
+  // Supports 3, 4, 5+ options and any question length without text overlap!
+  const questionHeights = [];
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const opts = q.options || [];
+    const optCount = Math.max(opts.length, 2);
+    const optBtnH = optCount >= 5 ? 34 : 38;
+    const optGap = optCount >= 5 ? 6 : 8;
+    const totalOptsH = optCount * optBtnH + (optCount - 1) * optGap;
+
+    const qNum = String(i + 1) + '. ';
+    const qFullStr = qNum + (q.sentence || q.question || '');
+    const contentW = hasImages ? (colW - 20 - Q_IMG_W - 18 - 20) : (colW - 48);
+    // Estimate text lines (Inter Bold 19px: ~10.8px per char in contentW)
+    const charsPerLine = Math.max(15, Math.floor(contentW / 11));
+    const estLines = Math.max(1, Math.ceil(qFullStr.length / charsPerLine));
+    const estTextH = Math.max(34, estLines * 28);
+
+    const neededH = 20 + estTextH + 14 + totalOptsH + 20;
+    const minCardH = hasImages ? Math.max(Q_IMG_H + 40, 260) : 240;
+    questionHeights.push({
+      optCount,
+      optBtnH,
+      optGap,
+      totalOptsH,
+      estTextH,
+      neededH: Math.max(neededH, minCardH)
+    });
+  }
+
+  // Row heights = maximum needed height in that row
+  const rowHeights = [];
+  const rowStartY = [];
+  let currentY = startGridY;
+  for (let r = 0; r < totalRows; r++) {
+    const idx0 = isTwoCol ? r * 2 : r;
+    const idx1 = isTwoCol ? r * 2 + 1 : -1;
+    const h0 = questionHeights[idx0] ? questionHeights[idx0].neededH : 280;
+    const h1 = (idx1 >= 0 && questionHeights[idx1]) ? questionHeights[idx1].neededH : 0;
+    const rH = Math.max(h0, h1);
+    rowHeights.push(rH);
+    rowStartY.push(currentY);
+    currentY += rH + ROW_GAP;
+  }
+
+  // Questions Grid (Adaptive 2 Columns layout)
   for (let idx = 0; idx < questions.length; idx++) {
     const q = questions[idx];
     const col = isTwoCol ? (idx % 2) : 0;
     const row = isTwoCol ? Math.floor(idx / 2) : idx;
     const qX = BX + PAD + col * (colW + COL_GAP);
-    const qY = startGridY + row * (cardH + ROW_GAP);
+    const qY = rowStartY[row];
+    const cardH = rowHeights[row];
+    const qMeta = questionHeights[idx];
 
     // 1. Background Card is created FIRST and placed at the bottom of z-stack
     const qCard = _eslMakeRect(qX, qY, colW, cardH, C.bg_card, 20);
@@ -2453,6 +2501,7 @@ async function drawESLQuizPhoto(params) {
     nodes.push(qCard);
 
     // 2. Image frame on the left side
+    const imgFrameH = cardH - 40;
     if (hasImages) {
       const imgFrame = _eslMakeRect(qX + 20, qY + 20, Q_IMG_W, imgFrameH, '#f8fafc', 14);
       nodes.push(imgFrame);
@@ -2488,16 +2537,19 @@ async function drawESLQuizPhoto(params) {
     const qNum = String(idx + 1) + '. ';
     const qFullStr = qNum + (q.sentence || q.question || '');
 
-    const qTxt = _eslMakeText(qFullStr, contentStartX, qY + 20, contentW, 44, C.text_primary, 19, 'Bold');
+    const qTxt = _eslMakeText(qFullStr, contentStartX, qY + 20, contentW, qMeta.estTextH, C.text_primary, 19, 'Bold');
     qTxt.name = 'Question Text ' + (idx + 1);
     nodes.push(qTxt);
 
-    // 4. Answer Buttons
+    // Measure actual rendered text height from Figma text node
+    const actualTextH = Math.max(qTxt.height || 0, qMeta.estTextH, 32);
+
+    // 4. Answer Buttons — Positioned strictly below question text with safe gap
     const opts = q.options || [];
-    const optCount = Math.min(opts.length, 4);
-    const optStartY = qY + 20 + 44 + 12;
-    const optBtnH = 38;
-    const optGap = 8;
+    const optCount = opts.length || 3;
+    const optBtnH = qMeta.optBtnH;
+    const optGap = qMeta.optGap;
+    const optStartY = qY + 20 + actualTextH + 14;
 
     for (let oi = 0; oi < optCount; oi++) {
       const btnY = optStartY + oi * (optBtnH + optGap);
@@ -2516,7 +2568,8 @@ async function drawESLQuizPhoto(params) {
       nodes.push(optCard);
 
       // Clean button text without A) B) C) prefixes
-      const optTxt = _eslMakeText((opts[oi] || ''), contentStartX + 14, btnY + 9, contentW - 28, 20, C.text_primary, 16, 'Medium');
+      const optTxtY = btnY + Math.round((optBtnH - 20) / 2);
+      const optTxt = _eslMakeText((opts[oi] || ''), contentStartX + 14, optTxtY, contentW - 28, 20, C.text_primary, 16, 'Medium');
       optTxt.name = 'Option Text';
       optTxt.setPluginData('role', 'quiz_option_text');
       optTxt.setPluginData('blockId', blockId);
@@ -2534,7 +2587,7 @@ async function drawESLQuizPhoto(params) {
   }
 
   // Hashtags footer
-  const gridBottomY = startGridY + totalRows * (cardH + ROW_GAP) - ROW_GAP;
+  const gridBottomY = (totalRows > 0 ? (rowStartY[totalRows - 1] + rowHeights[totalRows - 1]) : startGridY);
   const tagsY = gridBottomY + 24;
   const tagsNode = _eslMakeRect(BX + PAD, tagsY, BLOCK_W - PAD * 2, 38, '#f8fafc', 12);
   nodes.push(tagsNode);
@@ -2913,10 +2966,11 @@ async function drawESLVideoQuiz(params) {
 
     // Interactive Options (No LBLS, Just Text)
     const opts = q.options || [];
-    const optCount = Math.min(opts.length, 3);
-    const oW = (Q_W - 32) / 3 - 12;
+    const optCount = Math.max(opts.length, 2);
+    const oGap = 12;
+    const oW = Math.floor((Q_W - 32 - (optCount - 1) * oGap) / optCount);
     for (let oi = 0; oi < optCount; oi++) {
-      const oX = qX + 16 + oi * (oW + 16);
+      const oX = qX + 16 + oi * (oW + oGap);
       const isCorrect = oi === (q.correct_index || 0);
 
       const oCard = _eslMakeRect(oX, qy + 64, oW, 56, '#ffffff', 12);

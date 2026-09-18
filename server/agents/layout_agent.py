@@ -3,6 +3,7 @@ ESL Figma AI — Layout Agent
 Converts structured content JSON into Figma draw commands.
 Knows all visual rules: colors, typography, spacing, grouping.
 """
+import asyncio
 import logging
 from server import config, bridge
 from server.agents import toc_agent, image_agent
@@ -34,12 +35,16 @@ async def draw_quiz_photo(content: dict) -> dict:
 
     has_images = content.get("has_images", False)
     questions_data = content.get("questions", [])
+    is_child = content.get("is_child", False)
+    is_sticker = content.get("is_sticker", False) or (image_mode == "sticker")
     if has_images:
         questions_data = await image_agent.resolve_batch_images(
             questions_data,
             topic=content.get("topic", ""),
             item_query_key="image_query",
             image_mode=image_mode,
+            is_child=is_child,
+            is_sticker=is_sticker,
         )
 
     result = await bridge.send_command("DRAW_QUIZ_PHOTO", {
@@ -66,10 +71,16 @@ async def draw_flip_cards(content: dict) -> dict:
     design = _design()
 
     cards_data = content.get("cards", [])
+    image_mode = content.get("image_mode", "auto")
+    is_child = content.get("is_child", False)
+    is_sticker = content.get("is_sticker", False) or (image_mode == "sticker")
     cards_with_images = await image_agent.resolve_batch_images(
         cards_data,
         topic=content.get("topic", "english"),
-        item_query_key="image_query"
+        item_query_key="image_query",
+        image_mode=image_mode,
+        is_child=is_child,
+        is_sticker=is_sticker,
     )
 
     result = await bridge.send_command("DRAW_FLIP_CARDS", {
@@ -118,6 +129,8 @@ async def draw_vocabulary_table(content: dict) -> dict:
     logger.info(f"Drawing vocabulary_table: {content.get('title')}")
     design = _design()
     image_mode = content.get("image_mode", "auto")
+    is_child = content.get("is_child", False)
+    is_sticker = content.get("is_sticker", False) or (image_mode == "sticker")
 
     rows_data = content.get("rows", [])
 
@@ -127,6 +140,8 @@ async def draw_vocabulary_table(content: dict) -> dict:
         topic=content.get("topic", "english"),
         item_query_key="image_query",
         image_mode=image_mode,
+        is_child=is_child,
+        is_sticker=is_sticker,
     )
 
     result = await bridge.send_command("DRAW_VOCABULARY_TABLE", {
@@ -198,10 +213,16 @@ async def draw_speaking_cards(content: dict) -> dict:
     design = _design()
 
     cards_data = content.get("cards", [])
+    image_mode = content.get("image_mode", "auto")
+    is_child = content.get("is_child", False)
+    is_sticker = content.get("is_sticker", False) or (image_mode == "sticker")
     cards_with_images = await image_agent.resolve_batch_images(
         cards_data,
         topic=content.get("topic", "discussion"),
-        item_query_key="image_query"
+        item_query_key="image_query",
+        image_mode=image_mode,
+        is_child=is_child,
+        is_sticker=is_sticker,
     )
 
     result = await bridge.send_command("DRAW_SPEAKING_CARDS", {
