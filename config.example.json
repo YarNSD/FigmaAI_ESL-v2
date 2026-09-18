@@ -1,0 +1,71 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000,
+    "bridge_port": 45678
+  },
+  "ai": {
+    "engine": "antigravity",
+    "gemini_api_key": "",
+    "model": "gemini-3.8-flash-medium"
+  },
+  "figma": {
+    "boards": {
+      "demo": {
+        "display_name": "Демо Урок",
+        "name": "Демо Урок",
+        "url": "https://www.figma.com/board/example/Demo-Board",
+        "file_key": "example",
+        "board_type": "figjam",
+        "aliases": [
+          "демо",
+          "тест"
+        ]
+      }
+    },
+    "active_board": "demo"
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "",
+    "allowed_user_ids": [],
+    "proxy": {
+      "enabled": false,
+      "protocol": "socks5",
+      "host": "127.0.0.1",
+      "port": 2080,
+      "username": "",
+      "password": ""
+    }
+  },
+  "design": {
+    "colors": {
+      "bg_block": "#f8fafc",
+      "bg_card": "#ffffff",
+      "border": "#cbd5e1",
+      "accent": "#2563eb",
+      "accent_light": "#3b82f6",
+      "button_default": "#ffffff",
+      "correct": "#10b981",
+      "wrong": "#ef4444",
+      "text_primary": "#0f172a",
+      "text_secondary": "#334155",
+      "text_hashtags": "#64748b",
+      "header_bg": "#ffffff"
+    },
+    "typography": {
+      "font_family": "Inter",
+      "title_size": 26,
+      "subtitle_size": 18,
+      "body_size": 20,
+      "caption_size": 15,
+      "hashtag_size": 11
+    },
+    "layout": {
+      "padding": 32,
+      "gap": 18,
+      "corner_radius": 24,
+      "card_corner_radius": 16
+    }
+  }
+}

@@ -1,0 +1,2384 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESL AI Remote</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    html, body {
+      background: #090d16;
+      color: #f8fafc;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden !important;
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
+    }
+
+    html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+    }
+
+    .view-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }
+
+    /* ── Header: Status & Connection ─────────────────────────────────────── */
+    .header-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 12px;
+      padding: 6px 10px;
+      min-height: 36px;
+    }
+
+    .status-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      overflow: hidden;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      flex-shrink: 0;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    .dot.connected {
+      background: #10b981;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+    }
+
+    .board-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 145px;
+    }
+
+    .board-title.active {
+      color: #f8fafc;
+    }
+
+    .status-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    .badge.active-badge {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-icon {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      color: #94a3b8;
+      border-radius: 6px;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      padding: 0;
+      flex-shrink: 0;
+    }
+
+    .btn-icon:hover {
+      background: rgba(51, 65, 85, 0.95);
+      color: #f8fafc;
+      border-color: #64748b;
+    }
+
+    /* ── Main Action: Timestamp / Lesson Time ─────────────────────────────── */
+    .btn-timestamp {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      background: rgba(30, 41, 59, 0.7);
+      color: #e2e8f0;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      border-radius: 10px;
+      padding: 6px 10px;
+      min-height: 32px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+      width: 100%;
+      white-space: nowrap;
+    }
+
+    .btn-timestamp:hover {
+      background: rgba(51, 65, 85, 0.9);
+      border-color: rgba(96, 165, 250, 0.7);
+      color: #ffffff;
+    }
+
+    .btn-timestamp:active {
+      transform: translateY(1px);
+    }
+
+    .btn-ts-left {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .time-badge {
+      background: rgba(15, 23, 42, 0.85);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-variant-numeric: tabular-nums;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* ── Secondary Actions: TOC ───────────────────────────────────────────── */
+    .toc-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .btn-secondary {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: rgba(30, 41, 59, 0.7);
+      color: #cbd5e1;
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 10px;
+      padding: 9px 8px;
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+      text-align: center;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(51, 65, 85, 0.85);
+      color: #ffffff;
+      border-color: #64748b;
+    }
+
+    .btn-secondary:active {
+      transform: translateY(1px);
+    }
+
+    .btn-secondary svg {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+
+    /* ── Settings View ───────────────────────────────────────────────────── */
+    .settings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 10px;
+      padding: 5px 8px;
+      min-height: 32px;
+    }
+
+    .btn-back {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      color: #cbd5e1;
+      border-radius: 7px;
+      padding: 4px 8px;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-back:hover {
+      background: rgba(51, 65, 85, 1);
+      color: #ffffff;
+      border-color: #94a3b8;
+    }
+
+    .btn-back svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .settings-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: 0.2px;
+    }
+
+    .settings-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 10px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .settings-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .settings-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+
+    .mini-status {
+      font-size: 9px;
+      font-weight: 600;
+      color: #64748b;
+    }
+
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+
+    .server-input {
+      width: 100%;
+      background: #0b1120;
+      border: 1px solid rgba(71, 85, 105, 0.8);
+      border-radius: 7px;
+      color: #f8fafc;
+      font-size: 11px;
+      padding: 6px 24px 6px 8px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      outline: none;
+      transition: border 0.2s, box-shadow 0.2s;
+    }
+
+    .server-input:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    }
+
+    .btn-clear {
+      position: absolute;
+      right: 5px;
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+
+    .btn-clear:hover {
+      color: #ef4444;
+    }
+
+    .chips-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 1px;
+    }
+
+    .chip-hint {
+      font-size: 9px;
+      color: #64748b;
+    }
+
+    .chip-btn {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      color: #93c5fd;
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-size: 9.5px;
+      cursor: pointer;
+      font-family: 'Consolas', monospace;
+      transition: all 0.15s;
+    }
+
+    .chip-btn:hover {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: #3b82f6;
+      color: #ffffff;
+    }
+
+    .settings-actions-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .btn-save {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+      color: #ffffff;
+      border: 1px solid rgba(96, 165, 250, 0.5);
+      border-radius: 8px;
+      padding: 7px 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-save:hover {
+      background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-ping {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      border: 1px solid rgba(71, 85, 105, 0.7);
+      border-radius: 8px;
+      padding: 7px 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-ping:hover {
+      background: rgba(51, 65, 85, 0.95);
+      color: #ffffff;
+      border-color: #94a3b8;
+    }
+
+    .settings-footer-hint {
+      font-size: 9px;
+      color: #64748b;
+      text-align: center;
+      line-height: 1.3;
+    }
+
+    /* ── Backup Section ──────────────────────────────────────────────────── */
+    .backup-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 10px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+    }
+
+    .help-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+      font-size: 10.5px;
+      font-weight: 700;
+      cursor: pointer;
+      line-height: 1;
+      padding: 0;
+      transition: all 0.2s;
+    }
+
+    .help-btn:hover {
+      background: #38bdf8;
+      color: #090d16;
+      border-color: #38bdf8;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+      transform: scale(1.1);
+    }
+
+    .backup-help-popover {
+      display: none;
+      position: absolute;
+      top: 30px;
+      left: 6px;
+      right: 6px;
+      background: #0b1120;
+      border: 1px solid rgba(56, 189, 248, 0.5);
+      border-radius: 10px;
+      padding: 10px 11px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.9), 0 0 16px rgba(56, 189, 248, 0.25);
+      z-index: 100;
+      animation: fadeIn 0.18s ease-out;
+    }
+
+    .backup-help-popover.active {
+      display: block;
+    }
+
+    .help-popover-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.8);
+    }
+
+    .help-popover-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .help-popover-close {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 0 3px;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+
+    .help-popover-close:hover {
+      color: #f8fafc;
+    }
+
+    .help-step-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-top: 6px;
+      margin-bottom: 3px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .help-step-title:first-of-type {
+      margin-top: 0;
+    }
+
+    .help-step-desc {
+      font-size: 9.5px;
+      color: #cbd5e1;
+      line-height: 1.35;
+      margin-bottom: 4px;
+      padding-left: 6px;
+      border-left: 2px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .help-step-desc b {
+      color: #ffffff;
+    }
+
+    .help-step-tip {
+      font-size: 9px;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 5px;
+      padding: 4px 6px;
+      margin-top: 6px;
+      line-height: 1.3;
+    }
+
+    .backup-detail-text {
+      font-size: 9.5px;
+      color: #94a3b8;
+      line-height: 1.3;
+    }
+
+    .btn-backup {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      border: 1px solid rgba(59, 130, 246, 0.5);
+      border-radius: 8px;
+      padding: 7px 6px;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-backup:hover {
+      background: rgba(37, 99, 235, 0.25);
+      border-color: #60a5fa;
+      color: #ffffff;
+    }
+
+    .btn-restore {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 8px;
+      padding: 7px 6px;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-restore:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #f87171;
+      color: #ffffff;
+    }
+
+    .btn-restore:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      border-color: rgba(51, 65, 85, 0.6);
+      color: #64748b;
+    }
+
+    .btn-restore-folder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #fed7aa;
+      border: 1px solid rgba(249, 115, 22, 0.4);
+      border-radius: 8px;
+      padding: 7px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-restore-folder:hover:not(:disabled) {
+      background: rgba(249, 115, 22, 0.2);
+      border-color: #fb923c;
+      color: #ffffff;
+    }
+
+    .btn-restore-folder:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      border-color: rgba(51, 65, 85, 0.6);
+      color: #64748b;
+    }
+
+    /* ── Confirmation Modal / Overlay ────────────────────────────────────── */
+    .confirm-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(11, 17, 32, 0.88);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      z-index: 100;
+      animation: fadeIn 0.15s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.97); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .confirm-box {
+      background: #0f172a;
+      border: 1px solid rgba(239, 68, 68, 0.6);
+      border-radius: 12px;
+      padding: 14px 12px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 15px rgba(239, 68, 68, 0.2);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .confirm-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #f87171;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .confirm-msg {
+      font-size: 10px;
+      color: #cbd5e1;
+      line-height: 1.4;
+    }
+
+    .confirm-highlight {
+      color: #38bdf8;
+      font-weight: 600;
+      display: block;
+      margin: 4px 0;
+    }
+
+    .confirm-warning {
+      color: #f87171;
+      font-size: 9px;
+      display: block;
+      margin-top: 2px;
+    }
+
+    .confirm-btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1.25fr;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .btn-cancel {
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid rgba(71, 85, 105, 0.8);
+      color: #cbd5e1;
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-cancel:hover {
+      background: rgba(51, 65, 85, 1);
+      color: #ffffff;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #b91c1c 0%, #dc2626 100%);
+      border: 1px solid rgba(248, 113, 113, 0.6);
+      color: #ffffff;
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      box-shadow: 0 2px 8px rgba(220, 38, 38, 0.35);
+    }
+
+    .btn-danger:hover {
+      background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+      box-shadow: 0 4px 12px rgba(220, 38, 38, 0.5);
+    }
+
+    /* ── Scope Selector (All Board vs Selected) ──────────────────────────── */
+    .scope-toggle-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(51, 65, 85, 0.7);
+      border-radius: 8px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .scope-title-row {
+      font-size: 10px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .scope-sel-badge {
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      transition: all 0.2s;
+    }
+
+    .scope-sel-badge.zero {
+      background: rgba(100, 116, 139, 0.15);
+      color: #64748b;
+      border-color: rgba(100, 116, 139, 0.25);
+    }
+
+    .scope-options-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .scope-option-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 5px 4px;
+      border-radius: 6px;
+      border: 1px solid rgba(51, 65, 85, 0.7);
+      background: rgba(30, 41, 59, 0.5);
+      color: #94a3b8;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+    }
+
+    .scope-option-label input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+
+    .scope-option-label:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: #f8fafc;
+    }
+
+    .scope-option-label.active {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: #38bdf8;
+      color: #ffffff;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+    }
+
+    .scope-hint {
+      font-size: 9px;
+      color: #64748b;
+      line-height: 1.25;
+    }
+
+    /* ── Flash Toast Notification ────────────────────────────────────────── */
+    .toast-pill {
+      position: fixed;
+      bottom: 8px;
+      left: 12px;
+      right: 12px;
+      font-size: 10px;
+      color: #38bdf8;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      font-weight: 600;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      border-radius: 8px;
+      padding: 5px 10px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+      z-index: 999;
+      transform: translateY(6px);
+    }
+
+    .toast-pill.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── 1. Main View (Remote Controls) ──────────────────────────────────── -->
+  <div id="mainView" class="view-panel">
+    <!-- Status Row -->
+    <div class="header-card" title="Статус подключения к Antigravity Bridge">
+      <div class="status-left">
+        <div id="dot" class="dot"></div>
+        <span id="boardName" class="board-title">Подключение...</span>
+      </div>
+      <div class="status-right">
+        <span id="badge" class="badge">OFFLINE</span>
+        <button id="btnOpenSettings" class="btn-icon" title="Настройки подключения к серверу">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Primary Action: Insert Lesson Time & Date -->
+    <button id="timestampBtn" class="btn-timestamp" onclick="createTimestampBlockOnCanvas()" title="Создать на холсте плашку с датой и временем начала урока">
+      <div class="btn-ts-left">
+        <span>🕒</span>
+        <span>Вставить время урока</span>
+      </div>
+      <span id="liveClockPill" class="time-badge">--:--</span>
+    </button>
+
+    <!-- Secondary Actions: TOC -->
+    <div class="toc-row">
+      <button id="refreshTocBtn" class="btn-secondary" title="Просканировать доску и обновить меню навигации">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        <span id="refreshBtnText">Обновить меню</span>
+      </button>
+
+      <button id="toggleTocBtn" class="btn-secondary" title="Скрыть меню от учеников во время урока">
+        <svg id="toggleTocSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+          <line x1="1" y1="1" x2="23" y2="23"></line>
+        </svg>
+        <span id="toggleTocText">Скрыть меню</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 2. Settings View (Server Connection & Backup) ──────────────────── -->
+  <div id="settingsView" class="view-panel" style="display: none;">
+    <div class="settings-header">
+      <button id="btnBackToMain" class="btn-back" title="Вернуться к пульту управления">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Назад</span>
+      </button>
+      <span class="settings-title">⚙️ Настройки и бэкап</span>
+    </div>
+
+    <!-- Server IP Card -->
+    <div class="settings-card">
+      <div class="settings-label-row">
+        <label for="inputServerUrl" class="settings-label">Адрес сервера (IP или хост):</label>
+        <span id="currentStatusBadge" class="mini-status">...</span>
+      </div>
+      <div class="input-wrap">
+        <input id="inputServerUrl" class="server-input" type="text" placeholder="192.168.1.2:45678" spellcheck="false" autocomplete="off" />
+        <button id="btnClearInput" class="btn-clear" title="Очистить поле">✕</button>
+      </div>
+
+      <div class="chips-row">
+        <span class="chip-hint">Быстро:</span>
+        <button type="button" class="chip-btn" id="chipLocalhost">localhost</button>
+        <button type="button" class="chip-btn" id="chipLanIp">192.168.1.2</button>
+      </div>
+
+      <div class="settings-actions-row">
+        <button id="btnSaveAndConnect" class="btn-save" title="Сохранить настройки и подключиться">
+          <span>💾</span>
+          <span>Сохранить</span>
+        </button>
+        <button id="btnTestPing" class="btn-ping" title="Проверить связь с сервером">
+          <span>⚡</span>
+          <span id="pingBtnText">Проверить</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Board Backup & Restore Card -->
+    <div class="backup-card">
+      <div class="settings-label-row">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span class="settings-label">📁 Резервная копия доски:</span>
+          <button type="button" id="btnHelpBackup" class="help-btn" title="Инструкция для новичков (нажмите или наведите)">?</button>
+        </div>
+        <span id="backupStatusBadge" class="mini-status">Бэкап: нет</span>
+      </div>
+
+      <!-- Popover Help Guide for Beginners -->
+      <div id="backupHelpPopover" class="backup-help-popover">
+        <div class="help-popover-header">
+          <span class="help-popover-title">📘 Инструкция по бэкапу доски</span>
+          <button type="button" id="btnCloseHelp" class="help-popover-close" title="Закрыть">✕</button>
+        </div>
+        <div class="help-step-title">💾 Как сделать бэкап:</div>
+        <div class="help-step-desc">
+          1. Выберите область: <b>«Вся доска»</b> или <b>«Только выделенные»</b>.<br>
+          2. Выберите формат: <b>«Упаковать в ZIP»</b> (рекомендуется) или <b>«Единый .json»</b>.<br>
+          3. Нажмите синюю кнопку <b>«Сохранить бэкап»</b> и укажите папку на ПК.
+        </div>
+        <div class="help-step-title">🔄 Как восстановить доску:</div>
+        <div class="help-step-desc">
+          1. Откройте чистую или нужную доску в Figma.<br>
+          2. Нажмите <b>«📂 Файл (.json/.zip)»</b> и укажите файл сохранённого бэкапа.<br>
+          3. Подтвердите восстановление — элементы будут воссозданы на холсте в оригинальном виде!
+        </div>
+        <div class="help-step-tip">
+          💡 <b>Совет:</b> Бэкап <b>«Только выделенные»</b> удобен для сохранения отдельных блоков и уроков в личную библиотеку.
+        </div>
+      </div>
+
+      <div id="backupDetailText" class="backup-detail-text">Сохраняет <b>board.json</b> и папку <b>media/</b> в единый быстрый <b>.zip</b> архив.</div>
+
+      <!-- Scope Selector (All Board vs Selected Only) -->
+      <div class="scope-toggle-card">
+        <div class="scope-title-row">
+          <span>Область бэкапа:</span>
+          <span id="scopeSelBadge" class="scope-sel-badge zero">Выделено: 0</span>
+        </div>
+        <div class="scope-options-row">
+          <label class="scope-option-label active" id="labelScopeAll">
+            <input type="radio" name="backupScope" id="scopeAllBoard" value="full" checked>
+            <span>🌐 Вся доска</span>
+          </label>
+          <label class="scope-option-label" id="labelScopeSelected">
+            <input type="radio" name="backupScope" id="scopeSelectedOnly" value="selection">
+            <span>🎯 Выделенное</span>
+          </label>
+        </div>
+        <div id="scopeHintText" class="scope-hint">Сохраняет всё содержимое текущей страницы доски.</div>
+      </div>
+
+      <!-- Format selector -->
+      <div style="margin: 4px 0 6px 0; padding: 7px 8px; background: rgba(15, 23, 42, 0.7); border-radius: 8px; border: 1px solid rgba(51, 65, 85, 0.7);">
+        <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">Формат бэкапа:</div>
+        
+        <label style="display: flex; align-items: flex-start; gap: 7px; font-size: 11px; color: #f8fafc; cursor: pointer; margin-bottom: 6px;">
+          <input type="radio" name="backupFormat" id="radioFormatZip" value="zip" checked style="margin-top: 2px; accent-color: #38bdf8;">
+          <div>
+            <span style="font-weight: 600;">📦 Упаковать в ZIP</span>
+            <span style="font-size: 9.5px; color: #38bdf8; margin-left: 4px; font-weight: 600;">(Рекомендуется)</span>
+            <div style="font-size: 9px; color: #64748b; margin-top: 1px; line-height: 1.25;">Разметка board.json + папка media в быстром архиве</div>
+          </div>
+        </label>
+        
+        <label style="display: flex; align-items: flex-start; gap: 7px; font-size: 11px; color: #f8fafc; cursor: pointer; margin-bottom: 2px;">
+          <input type="radio" name="backupFormat" id="radioFormatSingle" value="single" style="margin-top: 2px; accent-color: #38bdf8;">
+          <div>
+            <span style="font-weight: 600;">📄 Единый .json</span>
+            <span style="font-size: 9.5px; color: #64748b; margin-left: 4px;">(Всё в одном файле)</span>
+            <div style="font-size: 9px; color: #64748b; margin-top: 1px; line-height: 1.25;">Для простых досок без большого количества фото</div>
+          </div>
+        </label>
+      </div>
+
+      <button id="btnCreateBackup" class="btn-backup" style="width: 100%; margin-bottom: 6px;" title="Сохранить полную копию доски в выбранном формате">
+        <span>💾</span>
+        <span id="btnBackupText">Сохранить бэкап</span>
+      </button>
+
+      <div style="font-size: 9.5px; color: #64748b; margin-bottom: 3px; font-weight: 600;">Восстановление доски:</div>
+      <div class="settings-actions-row">
+        <button id="btnRestoreBackup" class="btn-restore" title="Выбрать файл бэкапа (.json или .zip) на ПК">
+          <span>📂</span>
+          <span id="btnRestoreText">Файл (.json/.zip)</span>
+        </button>
+        <button id="btnRestoreFolder" class="btn-restore-folder" title="Выбрать папку бэкапа на ПК с файлом board.json и папкой media/">
+          <span>📁</span>
+          <span>Папка на диске</span>
+        </button>
+      </div>
+
+      <!-- Hidden file inputs for restore -->
+      <input type="file" id="restoreFileInput" accept=".json,.zip" style="display: none;" />
+      <input type="file" id="restoreFolderInput" webkitdirectory directory style="display: none;" />
+    </div>
+
+    <div class="settings-footer-hint">
+      При сохранении и восстановлении откроется окно проводника Windows.
+    </div>
+  </div>
+
+  <!-- ── 3. Confirmation Modal for Backup Restore ───────────────────────── -->
+  <div id="confirmRestoreOverlay" class="confirm-overlay" style="display: none;">
+    <div class="confirm-box">
+      <div class="confirm-title">
+        <span>⚠️</span>
+        <span id="confirmModalTitle">Восстановить доску из файла?</span>
+      </div>
+      <div class="confirm-msg">
+        <span id="confirmModalLead">Текущие элементы холста будут заменены:</span>
+        <span id="confirmBackupLabel" class="confirm-highlight">—</span>
+        <span id="confirmWarningText" class="confirm-warning">Внимание: несохранённые изменения будут стёрты!</span>
+      </div>
+      <div class="confirm-btn-row">
+        <button id="btnCancelRestore" class="btn-cancel">Отмена</button>
+        <button id="btnExecuteRestore" class="btn-danger">Да, восстановить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Feedback Toast ───────────────────────────────────────────────── -->
+  <div id="toastPill" class="toast-pill"></div>
+
+  <script>
+    // ── Server URL Normalizer ───────────────────────────────────────────────
+    function normalizeServerUrl(raw) {
+      let url = (raw || "").trim();
+      if (!url) return "http://localhost:45678";
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        url = "http://" + url;
+      }
+      url = url.replace(/\/+$/, "");
+      try {
+        const parsed = new URL(url);
+        if (!parsed.port) {
+          parsed.port = "45678";
+        }
+        return parsed.origin;
+      } catch (e) {
+        if (!url.includes(":", 7)) {
+          url = url + ":45678";
+        }
+        return url;
+      }
+    }
+
+    // ── Safe Storage Helpers (Figma sandbox blocks raw window.localStorage) ──
+    function safeGetStorage(key) {
+      try {
+        return window.localStorage ? window.localStorage.getItem(key) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function safeSetStorage(key, value) {
+      try {
+        if (window.localStorage) {
+          window.localStorage.setItem(key, value);
+        }
+      } catch (e) {}
+    }
+
+    const savedInitialUrl = safeGetStorage("figma_bridge_url");
+    let BRIDGE_URL = normalizeServerUrl(savedInitialUrl || "http://localhost:45678");
+    let API_URL = BRIDGE_URL.replace(":45678", ":3000");
+    const CANDIDATE_BRIDGE_URLS = [
+      "http://192.168.1.2:45678",
+      "http://localhost:45678"
+    ];
+
+    // ── DOM Elements ────────────────────────────────────────────────────────
+    const mainView = document.getElementById("mainView");
+    const settingsView = document.getElementById("settingsView");
+    const dotEl = document.getElementById("dot");
+    const boardNameEl = document.getElementById("boardName");
+    const badgeEl = document.getElementById("badge");
+    const btnOpenSettings = document.getElementById("btnOpenSettings");
+    const btnBackToMain = document.getElementById("btnBackToMain");
+    const inputServerUrl = document.getElementById("inputServerUrl");
+    const btnClearInput = document.getElementById("btnClearInput");
+    const chipLocalhost = document.getElementById("chipLocalhost");
+    const chipLanIp = document.getElementById("chipLanIp");
+    const btnSaveAndConnect = document.getElementById("btnSaveAndConnect");
+    const btnTestPing = document.getElementById("btnTestPing");
+    const pingBtnText = document.getElementById("pingBtnText");
+    const currentStatusBadge = document.getElementById("currentStatusBadge");
+    const liveClockPill = document.getElementById("liveClockPill");
+    const refreshTocBtn = document.getElementById("refreshTocBtn");
+    const refreshBtnText = document.getElementById("refreshBtnText");
+    const toggleTocBtn = document.getElementById("toggleTocBtn");
+    const toggleTocText = document.getElementById("toggleTocText");
+    const toastPill = document.getElementById("toastPill");
+
+    // Backup DOM Elements
+    const backupStatusBadge = document.getElementById("backupStatusBadge");
+    const backupDetailText = document.getElementById("backupDetailText");
+    const radioFormatZip = document.getElementById("radioFormatZip");
+    const radioFormatSingle = document.getElementById("radioFormatSingle");
+    const scopeAllBoard = document.getElementById("scopeAllBoard");
+    const scopeSelectedOnly = document.getElementById("scopeSelectedOnly");
+    const labelScopeAll = document.getElementById("labelScopeAll");
+    const labelScopeSelected = document.getElementById("labelScopeSelected");
+    const scopeSelBadge = document.getElementById("scopeSelBadge");
+    const scopeHintText = document.getElementById("scopeHintText");
+    const btnHelpBackup = document.getElementById("btnHelpBackup");
+    const backupHelpPopover = document.getElementById("backupHelpPopover");
+    const btnCloseHelp = document.getElementById("btnCloseHelp");
+    const btnCreateBackup = document.getElementById("btnCreateBackup");
+    const btnBackupText = document.getElementById("btnBackupText");
+    const btnRestoreBackup = document.getElementById("btnRestoreBackup");
+    const btnRestoreFolder = document.getElementById("btnRestoreFolder");
+    const btnRestoreText = document.getElementById("btnRestoreText");
+    const restoreFileInput = document.getElementById("restoreFileInput");
+    const restoreFolderInput = document.getElementById("restoreFolderInput");
+    const confirmRestoreOverlay = document.getElementById("confirmRestoreOverlay");
+    const confirmBackupLabel = document.getElementById("confirmBackupLabel");
+    const btnCancelRestore = document.getElementById("btnCancelRestore");
+    const btnExecuteRestore = document.getElementById("btnExecuteRestore");
+
+    let isPolling = false;
+    let isTOCVisible = true;
+    let tocExists = false;
+    let tabId = "figma_" + Math.random().toString(36).substring(2, 9);
+    let currentTitle = "Подключение...";
+    let currentFileKey = "";
+
+    let hasActiveBackup = false;
+    let latestBackupTime = "";
+    let latestBackupCount = 0;
+    let currentSelectionCount = 0;
+    let pendingRestoreData = null;
+    let pendingMediaMap = null;
+    let pendingRestoreFileName = "";
+
+    function showToast(text, duration = 1600) {
+      toastPill.textContent = text;
+      toastPill.classList.add("show");
+      setTimeout(() => {
+        toastPill.classList.remove("show");
+      }, duration);
+    }
+
+    // ── View Switching & Resizing ───────────────────────────────────────────
+    let lastSentHeight = 0;
+    let lastSentWidth = 0;
+    let resizeTimer = null;
+
+    function autoResizeUI() {
+      if (resizeTimer) cancelAnimationFrame(resizeTimer);
+      resizeTimer = requestAnimationFrame(() => {
+        const isSettings = settingsView && settingsView.style.display !== "none";
+        const activeView = isSettings ? settingsView : mainView;
+        if (!activeView) return;
+
+        // Since .view-panel has box-sizing: border-box and padding: 10px,
+        // rect.height is the exact rendered layout height.
+        // Add 1px buffer to prevent subpixel Chromium rounding overflow.
+        const rect = activeView.getBoundingClientRect();
+        const contentHeight = Math.ceil(rect.height || activeView.offsetHeight || (isSettings ? 560 : 148)) + 1;
+        const targetWidth = 320;
+
+        if (Math.abs(lastSentHeight - contentHeight) <= 1 && lastSentWidth === targetWidth) {
+          return;
+        }
+
+        lastSentHeight = contentHeight;
+        lastSentWidth = targetWidth;
+
+        parent.postMessage({
+          pluginMessage: {
+            type: "RESIZE_UI",
+            width: targetWidth,
+            height: contentHeight
+          }
+        }, "*");
+      });
+    }
+
+    function updateSelectionUI() {
+      if (scopeSelBadge) {
+        scopeSelBadge.textContent = `Выделено: ${currentSelectionCount}`;
+        if (currentSelectionCount > 0) {
+          scopeSelBadge.classList.remove("zero");
+        } else {
+          scopeSelBadge.classList.add("zero");
+        }
+      }
+
+      const isSel = scopeSelectedOnly && scopeSelectedOnly.checked;
+      if (labelScopeAll && labelScopeSelected) {
+        if (isSel) {
+          labelScopeAll.classList.remove("active");
+          labelScopeSelected.classList.add("active");
+          if (currentSelectionCount === 0) {
+            scopeHintText.innerHTML = "<span style='color: #f87171;'>⚠️ На холсте ничего не выделено.</span> Выделите карточки или блоки.";
+            btnBackupText.textContent = "Сохранить (выделите элементы)";
+          } else {
+            scopeHintText.innerHTML = `Будет сохранено выделенных элементов: <b>${currentSelectionCount} шт.</b>`;
+            btnBackupText.textContent = `Сохранить выделенное (${currentSelectionCount})`;
+          }
+        } else {
+          labelScopeAll.classList.add("active");
+          labelScopeSelected.classList.remove("active");
+          scopeHintText.textContent = "Сохраняет всё содержимое текущей страницы доски.";
+          btnBackupText.textContent = "Сохранить бэкап всей доски";
+        }
+      }
+      autoResizeUI();
+    }
+
+    let selectionPollTimer = null;
+
+    function requestSelectionUpdate() {
+      if (window.parent !== window) {
+        parent.postMessage({ pluginMessage: { type: "GET_SELECTION_STATUS" } }, "*");
+      }
+    }
+
+    function setBackupScope(scope) {
+      if (scope === "selection") {
+        if (scopeSelectedOnly) scopeSelectedOnly.checked = true;
+        if (scopeAllBoard) scopeAllBoard.checked = false;
+      } else {
+        if (scopeAllBoard) scopeAllBoard.checked = true;
+        if (scopeSelectedOnly) scopeSelectedOnly.checked = false;
+      }
+      updateSelectionUI();
+      requestSelectionUpdate();
+    }
+
+    function switchToMainView() {
+      if (selectionPollTimer) {
+        clearInterval(selectionPollTimer);
+        selectionPollTimer = null;
+      }
+      if (typeof hideHelpPopover === "function") hideHelpPopover(true);
+      confirmRestoreOverlay.style.display = "none";
+      settingsView.style.display = "none";
+      mainView.style.display = "flex";
+      autoResizeUI();
+    }
+
+    function switchToSettingsView() {
+      mainView.style.display = "none";
+      settingsView.style.display = "flex";
+      confirmRestoreOverlay.style.display = "none";
+      inputServerUrl.value = BRIDGE_URL;
+      updateSelectionUI();
+      autoResizeUI();
+
+      parent.postMessage({
+        pluginMessage: {
+          type: "GET_BACKUP_STATUS"
+        }
+      }, "*");
+      requestSelectionUpdate();
+
+      if (selectionPollTimer) clearInterval(selectionPollTimer);
+      selectionPollTimer = setInterval(() => {
+        if (settingsView && settingsView.style.display !== "none") {
+          requestSelectionUpdate();
+        } else {
+          clearInterval(selectionPollTimer);
+          selectionPollTimer = null;
+        }
+      }, 1000);
+    }
+
+    btnOpenSettings.addEventListener("click", switchToSettingsView);
+    btnBackToMain.addEventListener("click", switchToMainView);
+
+    if (labelScopeAll) {
+      labelScopeAll.addEventListener("click", (e) => {
+        e.preventDefault();
+        setBackupScope("full");
+      });
+    }
+    if (labelScopeSelected) {
+      labelScopeSelected.addEventListener("click", (e) => {
+        e.preventDefault();
+        setBackupScope("selection");
+      });
+    }
+
+    if (scopeAllBoard) {
+      scopeAllBoard.addEventListener("change", () => {
+        updateSelectionUI();
+      });
+    }
+    if (scopeSelectedOnly) {
+      scopeSelectedOnly.addEventListener("change", () => {
+        updateSelectionUI();
+        requestSelectionUpdate();
+      });
+    }
+
+    window.addEventListener("focus", requestSelectionUpdate);
+    document.addEventListener("mouseenter", requestSelectionUpdate);
+
+    // ── Help Popover Hover & Click Logic ────────────────────────────────────
+    let helpHideTimeout = null;
+    let helpPinned = false;
+
+    function showHelpPopover() {
+      if (helpHideTimeout) {
+        clearTimeout(helpHideTimeout);
+        helpHideTimeout = null;
+      }
+      if (backupHelpPopover) {
+        backupHelpPopover.classList.add("active");
+        autoResizeUI();
+      }
+    }
+
+    function hideHelpPopover(force = false) {
+      if (force) {
+        helpPinned = false;
+        if (backupHelpPopover) backupHelpPopover.classList.remove("active");
+        autoResizeUI();
+        return;
+      }
+      if (helpPinned) return;
+      if (helpHideTimeout) clearTimeout(helpHideTimeout);
+      helpHideTimeout = setTimeout(() => {
+        if (!helpPinned && backupHelpPopover) {
+          backupHelpPopover.classList.remove("active");
+          autoResizeUI();
+        }
+      }, 250);
+    }
+
+    if (btnHelpBackup && backupHelpPopover) {
+      btnHelpBackup.addEventListener("mouseenter", showHelpPopover);
+      btnHelpBackup.addEventListener("mouseleave", () => hideHelpPopover(false));
+      backupHelpPopover.addEventListener("mouseenter", showHelpPopover);
+      backupHelpPopover.addEventListener("mouseleave", () => hideHelpPopover(false));
+
+      btnHelpBackup.addEventListener("click", (e) => {
+        e.stopPropagation();
+        helpPinned = !helpPinned;
+        if (helpPinned) {
+          showHelpPopover();
+        } else {
+          hideHelpPopover(true);
+        }
+      });
+    }
+
+    if (btnCloseHelp) {
+      btnCloseHelp.addEventListener("click", (e) => {
+        e.stopPropagation();
+        hideHelpPopover(true);
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      if (helpPinned && backupHelpPopover && !backupHelpPopover.contains(e.target) && e.target !== btnHelpBackup) {
+        hideHelpPopover(true);
+      }
+    });
+
+    // ── Micro ZIP Engine (Zero-Dependency, STORE mode 0, 100% Offline) ───────
+    const CRC_TABLE = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) {
+        c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      CRC_TABLE[i] = c >>> 0;
+    }
+
+    function calcCrc32(bytes) {
+      let crc = 0xFFFFFFFF;
+      const len = bytes.length;
+      for (let i = 0; i < len; i++) {
+        crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xFF];
+      }
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    function getDosDateTime(d = new Date()) {
+      const time = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF;
+      const date = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+      return { time, date };
+    }
+
+    function base64ToUint8(b64) {
+      const bin = atob(b64);
+      const len = bin.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    function uint8ToBase64(bytes) {
+      let binary = "";
+      const len = bytes.byteLength;
+      const chunkSize = 8192;
+      for (let i = 0; i < len; i += chunkSize) {
+        const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+        binary += String.fromCharCode.apply(null, chunk);
+      }
+      return (typeof btoa === 'function') ? btoa(binary) : "";
+    }
+
+    function createStoreZip(files) {
+      const encoder = new TextEncoder();
+      const now = new Date();
+      const { time, date } = getDosDateTime(now);
+
+      const entries = files.map(f => {
+        const nameBytes = encoder.encode(f.path.replace(/\\/g, "/"));
+        const dataBytes = (f.data instanceof Uint8Array) ? f.data : (typeof f.data === "string" ? encoder.encode(f.data) : new Uint8Array(f.data));
+        const crc = calcCrc32(dataBytes);
+        return {
+          path: f.path,
+          nameBytes,
+          dataBytes,
+          crc,
+          size: dataBytes.length
+        };
+      });
+
+      let totalSize = 0;
+      for (const e of entries) {
+        totalSize += 30 + e.nameBytes.length + e.size;
+      }
+      const cdOffset = totalSize;
+      let cdSize = 0;
+      for (const e of entries) {
+        cdSize += 46 + e.nameBytes.length;
+      }
+      totalSize += cdSize + 22;
+
+      const buffer = new ArrayBuffer(totalSize);
+      const view = new DataView(buffer);
+      const out = new Uint8Array(buffer);
+
+      let offset = 0;
+      for (const e of entries) {
+        e.offset = offset;
+        view.setUint32(offset, 0x04034b50, true);
+        view.setUint16(offset + 4, 20, true);
+        view.setUint16(offset + 6, 0x0800, true); // UTF-8 filename flag
+        view.setUint16(offset + 8, 0, true); // STORE
+        view.setUint16(offset + 10, time, true);
+        view.setUint16(offset + 12, date, true);
+        view.setUint32(offset + 14, e.crc, true);
+        view.setUint32(offset + 18, e.size, true);
+        view.setUint32(offset + 22, e.size, true);
+        view.setUint16(offset + 26, e.nameBytes.length, true);
+        view.setUint16(offset + 28, 0, true);
+        offset += 30;
+
+        out.set(e.nameBytes, offset);
+        offset += e.nameBytes.length;
+
+        out.set(e.dataBytes, offset);
+        offset += e.size;
+      }
+
+      for (const e of entries) {
+        view.setUint32(offset, 0x02014b50, true);
+        view.setUint16(offset + 4, 20, true);
+        view.setUint16(offset + 6, 20, true);
+        view.setUint16(offset + 8, 0x0800, true);
+        view.setUint16(offset + 10, 0, true);
+        view.setUint16(offset + 12, time, true);
+        view.setUint16(offset + 14, date, true);
+        view.setUint32(offset + 16, e.crc, true);
+        view.setUint32(offset + 20, e.size, true);
+        view.setUint32(offset + 24, e.size, true);
+        view.setUint16(offset + 28, e.nameBytes.length, true);
+        view.setUint16(offset + 30, 0, true);
+        view.setUint16(offset + 32, 0, true);
+        view.setUint16(offset + 34, 0, true);
+        view.setUint16(offset + 36, 0, true);
+        view.setUint32(offset + 38, 0, true);
+        view.setUint32(offset + 42, e.offset, true);
+        offset += 46;
+
+        out.set(e.nameBytes, offset);
+        offset += e.nameBytes.length;
+      }
+
+      view.setUint32(offset, 0x06054b50, true);
+      view.setUint16(offset + 4, 0, true);
+      view.setUint16(offset + 6, 0, true);
+      view.setUint16(offset + 8, entries.length, true);
+      view.setUint16(offset + 10, entries.length, true);
+      view.setUint32(offset + 12, cdSize, true);
+      view.setUint32(offset + 16, cdOffset, true);
+      view.setUint16(offset + 20, 0, true);
+
+      return new Blob([buffer], { type: "application/zip" });
+    }
+
+    async function readZipArchive(arrayBuffer) {
+      const view = new DataView(arrayBuffer);
+      const decoder = new TextDecoder("utf-8");
+      const files = {};
+      let offset = 0;
+      const bufLen = arrayBuffer.byteLength;
+
+      while (offset + 30 <= bufLen) {
+        const sig = view.getUint32(offset, true);
+        if (sig === 0x04034b50) {
+          const method = view.getUint16(offset + 8, true);
+          const compSize = view.getUint32(offset + 18, true);
+          const nameLen = view.getUint16(offset + 26, true);
+          const extraLen = view.getUint16(offset + 28, true);
+
+          const nameBytes = new Uint8Array(arrayBuffer, offset + 30, nameLen);
+          const fileName = decoder.decode(nameBytes);
+          const dataStart = offset + 30 + nameLen + extraLen;
+
+          if (compSize > 0 && dataStart + compSize <= bufLen) {
+            const rawBytes = new Uint8Array(arrayBuffer, dataStart, compSize);
+            if (method === 0) {
+              files[fileName] = rawBytes;
+            } else if (method === 8 && typeof DecompressionStream !== "undefined") {
+              try {
+                const stream = new Response(rawBytes).body.pipeThrough(new DecompressionStream("deflate-raw"));
+                const ab = await new Response(stream).arrayBuffer();
+                files[fileName] = new Uint8Array(ab);
+              } catch (_) {
+                files[fileName] = rawBytes;
+              }
+            } else {
+              files[fileName] = rawBytes;
+            }
+          }
+          offset = dataStart + compSize;
+        } else if (sig === 0x02014b50 || sig === 0x06054b50) {
+          break;
+        } else {
+          offset++;
+        }
+      }
+      return files;
+    }
+
+    // ── Format Selection & UI Helpers ────────────────────────────────────────
+    function updateBackupDetailHint() {
+      if (radioFormatZip && radioFormatZip.checked) {
+        backupDetailText.innerHTML = "Сохраняет <b>board.json</b> и папку <b>media/</b> в единый быстрый <b>.zip</b> архив.";
+      } else {
+        backupDetailText.innerHTML = "Сохраняет всю доску в единый файл <b>.json</b> через стандартное окно сохранения Windows.";
+      }
+    }
+
+    if (radioFormatZip) {
+      radioFormatZip.addEventListener("change", () => {
+        updateBackupDetailHint();
+        autoResizeUI();
+      });
+    }
+
+    if (radioFormatSingle) {
+      radioFormatSingle.addEventListener("change", () => {
+        updateBackupDetailHint();
+        autoResizeUI();
+      });
+    }
+
+    // ── Save Blob with Windows Dialog ────────────────────────────────────────
+    async function saveBlobWithWindowsDialog(blob, defaultFileName, mimeType, description) {
+      if (typeof window.showSaveFilePicker === "function") {
+        try {
+          const ext = defaultFileName.endsWith(".zip") ? ".zip" : ".json";
+          const acceptMap = {};
+          acceptMap[mimeType] = [ext];
+          const handle = await window.showSaveFilePicker({
+            suggestedName: defaultFileName,
+            types: [{
+              description: description || "Резервная копия Figma",
+              accept: acceptMap
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return { success: true, name: handle.name };
+        } catch (err) {
+          if (err.name === "AbortError") {
+            return { success: false, cancelled: true };
+          }
+        }
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = defaultFileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3500);
+      return { success: true, name: defaultFileName };
+    }
+
+    async function handleExportedBackup(msg) {
+      const isSplit = msg.format === "split";
+      const isZip = !!msg.isZip;
+      const backupData = msg.backupData;
+      const mediaFiles = msg.mediaFiles || [];
+
+      // 1. Split package packaged as ZIP
+      if (isSplit && isZip) {
+        const jsonStr = JSON.stringify(backupData);
+        const zipFiles = [
+          { path: "board.json", data: new TextEncoder().encode(jsonStr) }
+        ];
+        for (const mf of mediaFiles) {
+          const bytes = (typeof mf.bytesBase64 === "string") ? base64ToUint8(mf.bytesBase64) : mf.data;
+          zipFiles.push({ path: mf.path, data: bytes });
+        }
+        const zipBlob = createStoreZip(zipFiles);
+        return await saveBlobWithWindowsDialog(zipBlob, msg.fileName, "application/zip", "ZIP-архив бэкапа (.zip)");
+      }
+
+      // 2. Split package directly into a Folder on disk
+      if (isSplit && !isZip) {
+        if (typeof window.showDirectoryPicker === "function") {
+          try {
+            const dirHandle = await window.showDirectoryPicker();
+            const jsonFileHandle = await dirHandle.getFileHandle("board.json", { create: true });
+            const jsonWritable = await jsonFileHandle.createWritable();
+            await jsonWritable.write(JSON.stringify(backupData));
+            await jsonWritable.close();
+
+            if (mediaFiles.length > 0) {
+              const mediaDir = await dirHandle.getDirectoryHandle("media", { create: true });
+              for (const mf of mediaFiles) {
+                const cleanName = mf.name || mf.path.replace("media/", "");
+                const imgHandle = await mediaDir.getFileHandle(cleanName, { create: true });
+                const imgWritable = await imgHandle.createWritable();
+                const bytes = (typeof mf.bytesBase64 === "string") ? base64ToUint8(mf.bytesBase64) : mf.data;
+                await imgWritable.write(bytes);
+                await imgWritable.close();
+              }
+            }
+            return { success: true, name: dirHandle.name + " (папка с media/)" };
+          } catch (dirErr) {
+            if (dirErr.name === "AbortError") {
+              return { success: false, cancelled: true };
+            }
+            console.warn("showDirectoryPicker error, fallback to ZIP:", dirErr);
+            showToast("Выбор папки недоступен — сохраняю как ZIP");
+            const jsonStr = JSON.stringify(backupData);
+            const zipFiles = [{ path: "board.json", data: new TextEncoder().encode(jsonStr) }];
+            for (const mf of mediaFiles) {
+              const bytes = (typeof mf.bytesBase64 === "string") ? base64ToUint8(mf.bytesBase64) : mf.data;
+              zipFiles.push({ path: mf.path, data: bytes });
+            }
+            const zipBlob = createStoreZip(zipFiles);
+            return await saveBlobWithWindowsDialog(zipBlob, msg.fileName + ".zip", "application/zip", "ZIP-архив бэкапа (.zip)");
+          }
+        } else {
+          showToast("Запись папок не поддерживается — упаковываю в ZIP");
+          const jsonStr = JSON.stringify(backupData);
+          const zipFiles = [{ path: "board.json", data: new TextEncoder().encode(jsonStr) }];
+          for (const mf of mediaFiles) {
+            const bytes = (typeof mf.bytesBase64 === "string") ? base64ToUint8(mf.bytesBase64) : mf.data;
+            zipFiles.push({ path: mf.path, data: bytes });
+          }
+          const zipBlob = createStoreZip(zipFiles);
+          return await saveBlobWithWindowsDialog(zipBlob, msg.fileName + ".zip", "application/zip", "ZIP-архив бэкапа (.zip)");
+        }
+      }
+
+      // 3. Single JSON (All-in-one)
+      const jsonStr = JSON.stringify(backupData);
+      const jsonBlob = new Blob([jsonStr], { type: "application/json" });
+      return await saveBlobWithWindowsDialog(jsonBlob, msg.fileName, "application/json", "Резервная копия доски (.json)");
+    }
+
+    // ── Board Backup & Restore Actions ──────────────────────────────────────
+    function showRestoreModal(parsed, mediaMap, fileName, typeLabel, mediaCount = 0) {
+      pendingRestoreData = parsed;
+      pendingMediaMap = mediaMap;
+      pendingRestoreFileName = fileName;
+
+      const isSel = parsed && parsed.scope === "selection";
+      const time = parsed.backupTime || "из файла";
+      const count = parsed.count || (parsed.nodes ? parsed.nodes.length : "?");
+      const mediaStr = mediaCount > 0 ? ` + ${mediaCount} медиа` : "";
+
+      confirmBackupLabel.innerHTML = `<b>${fileName}</b> [${typeLabel}]<br>🕒 ${time} • ${count} эл.${mediaStr}`;
+
+      const confirmModalTitle = document.getElementById("confirmModalTitle");
+      const confirmModalLead = document.getElementById("confirmModalLead");
+      const confirmWarningText = document.getElementById("confirmWarningText");
+
+      if (isSel) {
+        if (confirmModalTitle) confirmModalTitle.textContent = "Восстановить выделенные элементы?";
+        if (confirmModalLead) confirmModalLead.textContent = "Элементы будут добавлены на текущую доску:";
+        if (confirmWarningText) {
+          confirmWarningText.textContent = "✓ Существующие материалы доски не будут удалены.";
+          confirmWarningText.style.color = "#38bdf8";
+        }
+      } else {
+        if (confirmModalTitle) confirmModalTitle.textContent = "Восстановить доску из файла?";
+        if (confirmModalLead) confirmModalLead.textContent = "Текущие элементы холста будут заменены материалами из бэкапа:";
+        if (confirmWarningText) {
+          confirmWarningText.textContent = "Внимание: текущие несохранённые изменения будут стёрты!";
+          confirmWarningText.style.color = "#f87171";
+        }
+      }
+
+      confirmRestoreOverlay.style.display = "flex";
+      autoResizeUI();
+    }
+
+    btnCreateBackup.addEventListener("click", () => {
+      const isSelectionOnly = scopeSelectedOnly && scopeSelectedOnly.checked;
+      if (isSelectionOnly && currentSelectionCount === 0) {
+        showToast("⚠️ Сначала выделите элементы на доске!");
+        return;
+      }
+
+      btnBackupText.textContent = "Сбор данных...";
+      btnCreateBackup.style.opacity = "0.7";
+
+      const isZip = radioFormatZip ? radioFormatZip.checked : true;
+
+      parent.postMessage({
+        pluginMessage: {
+          type: "EXPORT_BOARD_TO_FILE",
+          options: {
+            format: isZip ? "split" : "single",
+            isZip: isZip,
+            scope: isSelectionOnly ? "selection" : "full"
+          }
+        }
+      }, "*");
+    });
+
+    btnRestoreBackup.addEventListener("click", () => {
+      restoreFileInput.value = "";
+      restoreFileInput.click();
+    });
+
+    restoreFileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+
+      if (file.size > 250 * 1024 * 1024) {
+        showToast("⚠️ Файл очень большой (>250 МБ). Загрузка может занять время...", 4000);
+      }
+
+      if (file.name.toLowerCase().endsWith(".zip")) {
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const arrayBuf = evt.target.result;
+            const zipFiles = await readZipArchive(arrayBuf);
+            const jsonKey = Object.keys(zipFiles).find(k => k === "board.json" || k.endsWith(".json"));
+            if (!jsonKey) {
+              throw new Error("В архиве не найден файл board.json");
+            }
+            const jsonText = new TextDecoder("utf-8").decode(zipFiles[jsonKey]);
+            const parsed = JSON.parse(jsonText);
+            if (!parsed || (!parsed.nodes && !Array.isArray(parsed))) {
+              throw new Error("Неверная структура данных в board.json");
+            }
+
+            const mediaMap = {};
+            let mediaCount = 0;
+            for (const [k, bytes] of Object.entries(zipFiles)) {
+              if (k !== jsonKey && !k.endsWith("/")) {
+                const b64 = uint8ToBase64(bytes);
+                mediaMap[k] = b64;
+                mediaMap[k.replace("media/", "")] = b64;
+                mediaCount++;
+              }
+            }
+
+            showRestoreModal(parsed, mediaMap, file.name, "ZIP", mediaCount);
+          } catch (err) {
+            console.error("ZIP restore error:", err);
+            showToast("❌ Ошибка чтения ZIP-архива: " + err.message, 3500);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const raw = evt.target.result;
+            const parsed = JSON.parse(raw);
+            if (!parsed || (!parsed.nodes && !Array.isArray(parsed))) {
+              throw new Error("Неверный формат структуры бэкапа");
+            }
+
+            showRestoreModal(parsed, null, file.name, "JSON", 0);
+          } catch (err) {
+            showToast("❌ Ошибка чтения файла: " + (err.message || "неверный JSON"), 3000);
+          }
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    btnRestoreFolder.addEventListener("click", async () => {
+      if (typeof window.showDirectoryPicker === "function") {
+        try {
+          const dirHandle = await window.showDirectoryPicker();
+          const jsonHandle = await dirHandle.getFileHandle("board.json");
+          const jsonFile = await jsonHandle.getFile();
+          const jsonText = await jsonFile.text();
+          const parsed = JSON.parse(jsonText);
+
+          const mediaMap = {};
+          let mediaCount = 0;
+          try {
+            const mediaDir = await dirHandle.getDirectoryHandle("media");
+            for await (const [name, handle] of mediaDir.entries()) {
+              if (handle.kind === "file") {
+                const f = await handle.getFile();
+                const ab = await f.arrayBuffer();
+                const b64 = uint8ToBase64(new Uint8Array(ab));
+                mediaMap["media/" + name] = b64;
+                mediaMap[name] = b64;
+                mediaCount++;
+              }
+            }
+          } catch (_) {}
+
+          showRestoreModal(parsed, mediaMap, dirHandle.name, "Папка", mediaCount);
+          return;
+        } catch (dirErr) {
+          if (dirErr.name === "AbortError") return;
+        }
+      }
+
+      restoreFolderInput.value = "";
+      restoreFolderInput.click();
+    });
+
+    restoreFolderInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files || files.length === 0) return;
+
+      const boardJsonFile = files.find(f => f.name === "board.json" || (f.webkitRelativePath && f.webkitRelativePath.endsWith("board.json")));
+      if (!boardJsonFile) {
+        showToast("❌ В выбранной папке не найден файл board.json", 3500);
+        return;
+      }
+
+      try {
+        const jsonText = await boardJsonFile.text();
+        const parsed = JSON.parse(jsonText);
+        const mediaMap = {};
+        let mediaCount = 0;
+
+        for (const f of files) {
+          if (f !== boardJsonFile && (f.webkitRelativePath.includes("/media/") || f.name.match(/\.(png|jpe?g|webp|gif|svg)$/i))) {
+            const ab = await f.arrayBuffer();
+            const b64 = uint8ToBase64(new Uint8Array(ab));
+            mediaMap["media/" + f.name] = b64;
+            mediaMap[f.name] = b64;
+            mediaCount++;
+          }
+        }
+
+        const folderName = files[0].webkitRelativePath ? files[0].webkitRelativePath.split("/")[0] : "Папка бэкапа";
+        showRestoreModal(parsed, mediaMap, folderName, "Папка", mediaCount);
+      } catch (err) {
+        showToast("❌ Ошибка чтения папки: " + err.message, 3500);
+      }
+    });
+
+    btnCancelRestore.addEventListener("click", () => {
+      confirmRestoreOverlay.style.display = "none";
+      pendingRestoreData = null;
+      pendingMediaMap = null;
+      pendingRestoreFileName = "";
+      autoResizeUI();
+    });
+
+    btnExecuteRestore.addEventListener("click", () => {
+      confirmRestoreOverlay.style.display = "none";
+      autoResizeUI();
+      btnRestoreText.textContent = "Восстановление...";
+      btnRestoreBackup.disabled = true;
+      btnRestoreFolder.disabled = true;
+
+      if (pendingRestoreData) {
+        parent.postMessage({
+          pluginMessage: {
+            type: "RESTORE_BOARD_FROM_DATA",
+            data: pendingRestoreData,
+            mediaMap: pendingMediaMap || null
+          }
+        }, "*");
+        pendingRestoreData = null;
+        pendingMediaMap = null;
+        pendingRestoreFileName = "";
+      } else {
+        parent.postMessage({
+          pluginMessage: {
+            type: "RESTORE_BOARD_BACKUP"
+          }
+        }, "*");
+      }
+    });
+
+    // ── Settings Actions ────────────────────────────────────────────────────
+    btnClearInput.addEventListener("click", () => {
+      inputServerUrl.value = "";
+      inputServerUrl.focus();
+    });
+
+    chipLocalhost.addEventListener("click", () => {
+      inputServerUrl.value = "http://localhost:45678";
+    });
+
+    chipLanIp.addEventListener("click", () => {
+      inputServerUrl.value = "http://192.168.1.2:45678";
+    });
+
+    inputServerUrl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        saveAndApplyServerUrl();
+      }
+    });
+
+    async function testServerConnection(targetUrl) {
+      const url = normalizeServerUrl(targetUrl);
+      pingBtnText.textContent = "Связь...";
+      currentStatusBadge.textContent = "⏳ Проверка...";
+      currentStatusBadge.style.color = "#38bdf8";
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+        const resp = await fetch(url + "/poll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tab_id: tabId,
+            title: currentTitle,
+            fileKey: currentFileKey
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (resp.ok) {
+          pingBtnText.textContent = "Успешно!";
+          currentStatusBadge.textContent = "✅ Онлайн";
+          currentStatusBadge.style.color = "#10b981";
+          showToast("✓ Сервер доступен: " + url);
+          return true;
+        } else {
+          throw new Error("HTTP " + resp.status);
+        }
+      } catch (err) {
+        pingBtnText.textContent = "Ошибка";
+        currentStatusBadge.textContent = "❌ Недоступен";
+        currentStatusBadge.style.color = "#ef4444";
+        showToast("✕ Ошибка связи: " + url);
+        return false;
+      } finally {
+        setTimeout(() => {
+          pingBtnText.textContent = "Проверить";
+        }, 2200);
+      }
+    }
+
+    async function saveAndApplyServerUrl() {
+      const raw = inputServerUrl.value.trim();
+      const normalized = normalizeServerUrl(raw);
+      BRIDGE_URL = normalized;
+      API_URL = normalized.replace(":45678", ":3000");
+
+      safeSetStorage("figma_bridge_url", BRIDGE_URL);
+      parent.postMessage({
+        pluginMessage: {
+          type: "SAVE_SETTINGS",
+          bridgeUrl: BRIDGE_URL
+        }
+      }, "*");
+
+      inputServerUrl.value = BRIDGE_URL;
+      showToast("✓ Адрес сохранён!");
+
+      testServerConnection(BRIDGE_URL);
+
+      setTimeout(() => {
+        switchToMainView();
+      }, 700);
+    }
+
+    btnSaveAndConnect.addEventListener("click", saveAndApplyServerUrl);
+    btnTestPing.addEventListener("click", () => {
+      testServerConnection(inputServerUrl.value);
+    });
+
+    // ── Live Clock in Button ────────────────────────────────────────────────
+    function updateClock() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const months = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+      const dateStr = now.getDate() + " " + months[now.getMonth()];
+      liveClockPill.textContent = `${hh}:${mm} • ${dateStr}`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // ── Insert Timestamp Action ─────────────────────────────────────────────
+    function createTimestampBlockOnCanvas() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const timeString = `${hh}:${mm}`;
+
+      const daysOfWeek = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
+      const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+      const shortMonths = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+      const dayName = daysOfWeek[now.getDay()];
+      const dayNum = now.getDate();
+      const monthName = months[now.getMonth()];
+      const year = now.getFullYear();
+
+      const fullDate = `${dayName}, ${dayNum} ${monthName} ${year}`;
+      const shortDate = `${dayNum} ${shortMonths[now.getMonth()]}`;
+
+      parent.postMessage({
+        pluginMessage: {
+          type: "CREATE_TIMESTAMP_BLOCK",
+          time: timeString,
+          date: fullDate,
+          short_date: shortDate
+        }
+      }, "*");
+
+      showToast("✓ Отметка времени вставлена на холст!");
+    }
+
+    // ── TOC Buttons ─────────────────────────────────────────────────────────
+    refreshTocBtn.addEventListener("click", () => {
+      refreshBtnText.textContent = "Сканирую...";
+      refreshTocBtn.style.opacity = "0.7";
+
+      parent.postMessage({
+        pluginMessage: { type: "REFRESH_TOC" }
+      }, "*");
+
+      setTimeout(() => {
+        refreshBtnText.textContent = "Обновить меню";
+        refreshTocBtn.style.opacity = "1";
+        showToast("✓ Меню навигации обновлено!");
+      }, 1200);
+    });
+
+    toggleTocBtn.addEventListener("click", () => {
+      parent.postMessage({
+        pluginMessage: {
+          type: "TOGGLE_TOC",
+          visible: !isTOCVisible
+        }
+      }, "*");
+    });
+
+    function updateTOCButtonUI(exists, isVisible) {
+      tocExists = exists;
+      isTOCVisible = isVisible;
+
+      if (!exists) {
+        toggleTocText.textContent = "Меню (нет)";
+        toggleTocBtn.style.opacity = "0.5";
+      } else if (isVisible) {
+        toggleTocText.textContent = "Скрыть меню";
+        toggleTocBtn.style.opacity = "1";
+      } else {
+        toggleTocText.textContent = "Показать меню";
+        toggleTocBtn.style.opacity = "1";
+      }
+    }
+
+    // ── Bridge Long-Poll ────────────────────────────────────────────────────
+    async function pollBridge() {
+      if (window.parent === window) {
+        dotEl.classList.remove("connected");
+        boardNameEl.textContent = "Режим предпросмотра";
+        badgeEl.textContent = "PREVIEW";
+        return;
+      }
+
+      if (isPolling) return;
+      isPolling = true;
+
+      try {
+        let resp = null;
+        let lastErr = null;
+        const urlsToTry = [BRIDGE_URL, ...CANDIDATE_BRIDGE_URLS.filter(u => u !== BRIDGE_URL)];
+
+        for (const url of urlsToTry) {
+          try {
+            const ctrl = new AbortController();
+            const tid = setTimeout(() => ctrl.abort(), 3000);
+            const r = await fetch(url + "/poll", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                tab_id: tabId,
+                title: currentTitle,
+                fileKey: currentFileKey
+              }),
+              signal: ctrl.signal
+            });
+            clearTimeout(tid);
+            if (r.ok) {
+              resp = r;
+              if (url !== BRIDGE_URL) {
+                BRIDGE_URL = url;
+                API_URL = url.replace(":45678", ":3000");
+                safeSetStorage("figma_bridge_url", BRIDGE_URL);
+                if (inputServerUrl) inputServerUrl.value = BRIDGE_URL;
+                parent.postMessage({
+                  pluginMessage: {
+                    type: "SAVE_SETTINGS",
+                    bridgeUrl: BRIDGE_URL
+                  }
+                }, "*");
+              }
+              break;
+            }
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+
+        if (!resp) throw (lastErr || new Error("Offline"));
+
+        dotEl.classList.add("connected");
+        badgeEl.classList.add("active-badge");
+        badgeEl.textContent = "ONLINE";
+        currentStatusBadge.textContent = "✅ Онлайн";
+        currentStatusBadge.style.color = "#10b981";
+
+        const data = await resp.json();
+        if (data && data.is_active) {
+          boardNameEl.textContent = "⭐ " + currentTitle;
+          boardNameEl.classList.add("active");
+        } else {
+          boardNameEl.textContent = currentTitle;
+          boardNameEl.classList.remove("active");
+        }
+
+        if (data && data.command) {
+          showToast("⚡ Рисую блок на доске...");
+          parent.postMessage({
+            pluginMessage: {
+              type: "EXEC_COMMAND",
+              command: data.command
+            }
+          }, "*");
+        }
+      } catch (err) {
+        dotEl.classList.remove("connected");
+        boardNameEl.textContent = "Офлайн";
+        boardNameEl.classList.remove("active");
+        badgeEl.classList.remove("active-badge");
+        badgeEl.textContent = "OFFLINE";
+        currentStatusBadge.textContent = "❌ Офлайн";
+        currentStatusBadge.style.color = "#ef4444";
+      } finally {
+        isPolling = false;
+        setTimeout(pollBridge, 500);
+      }
+    }
+
+    // ── Plugin Code Messages ────────────────────────────────────────────────
+    window.onmessage = async (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      if (msg.type === "DOC_INFO") {
+        if (msg.title) currentTitle = msg.title;
+        if (msg.fileKey) currentFileKey = msg.fileKey;
+        boardNameEl.textContent = currentTitle;
+      }
+
+      if (msg.type === "SETTINGS_LOADED" && msg.bridgeUrl) {
+        BRIDGE_URL = normalizeServerUrl(msg.bridgeUrl);
+        API_URL = BRIDGE_URL.replace(":45678", ":3000");
+        safeSetStorage("figma_bridge_url", BRIDGE_URL);
+        if (inputServerUrl) inputServerUrl.value = BRIDGE_URL;
+      }
+
+      if (msg.type === "TOC_STATUS") {
+        updateTOCButtonUI(msg.exists, msg.isVisible);
+      }
+
+      if (msg.type === "COMMAND_RESULT") {
+        showToast("✓ Готово!");
+        if (msg.cmd_id) {
+          try {
+            await fetch(BRIDGE_URL + "/result", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(msg)
+            });
+          } catch(e) {}
+        }
+      }
+
+      if (msg.type === "SELECTION_CHANGE") {
+        currentSelectionCount = typeof msg.count === "number" ? msg.count : 0;
+        updateSelectionUI();
+      }
+
+      if (msg.type === "BACKUP_ERROR") {
+        btnCreateBackup.style.opacity = "1";
+        updateSelectionUI();
+        if (msg.message === "no_selection") {
+          showToast("⚠️ Выделите элементы на доске!");
+        } else if (msg.message === "empty") {
+          showToast("⚠️ На доске нет элементов!");
+        }
+      }
+
+      if (msg.type === "BOARD_EXPORTED_DATA") {
+        btnBackupText.textContent = "Сохранить бэкап";
+        btnCreateBackup.style.opacity = "1";
+        updateSelectionUI();
+
+        const isSel = msg.scope === "selection";
+        const defaultFileName = msg.fileName || (isSel ? `selection_backup_${Date.now()}.zip` : `figma_board_backup_${Date.now()}.zip`);
+        const time = msg.time || "";
+        const count = msg.count || 0;
+        const mediaCount = msg.mediaCount || 0;
+
+        handleExportedBackup(msg).then((res) => {
+          if (res && res.cancelled) {
+            showToast("Сохранение отменено");
+            return;
+          }
+          const savedName = (res && res.name) || defaultFileName;
+          const mediaNote = mediaCount > 0 ? ` + ${mediaCount} медиа` : "";
+          const toastPrefix = isSel ? "Бэкап выделенного сохранён" : "Бэкап доски сохранён";
+          showToast(`✓ ${toastPrefix}: ${savedName}`, 3500);
+
+          if (!isSel) {
+            backupStatusBadge.textContent = `${time} (${count} эл.${mediaNote})`;
+            backupStatusBadge.style.color = "#38bdf8";
+          }
+          backupDetailText.innerHTML = `Сохранено: <b>${savedName}</b> (${count} эл.${mediaNote})`;
+          btnRestoreBackup.disabled = false;
+          btnRestoreFolder.disabled = false;
+        }).catch((err) => {
+          console.error("handleExportedBackup error:", err);
+          showToast("❌ Ошибка сохранения: " + (err.message || "сбой"), 2500);
+        });
+      }
+
+      if (msg.type === "BACKUP_STATUS") {
+        btnBackupText.textContent = "Сохранить бэкап";
+        btnCreateBackup.style.opacity = "1";
+        hasActiveBackup = !!msg.hasBackup;
+        latestBackupTime = msg.time || "";
+        latestBackupCount = msg.count || 0;
+
+        if (hasActiveBackup) {
+          backupStatusBadge.textContent = `${latestBackupTime} (${latestBackupCount} эл.)`;
+          backupStatusBadge.style.color = "#38bdf8";
+          backupDetailText.innerHTML = `Резервная копия на доске: <b>${latestBackupCount} эл.</b> от ${latestBackupTime}.`;
+          btnRestoreBackup.disabled = false;
+          btnRestoreFolder.disabled = false;
+        } else {
+          backupStatusBadge.textContent = "Бэкап: нет";
+          backupStatusBadge.style.color = "#64748b";
+          updateBackupDetailHint();
+        }
+        updateSelectionUI();
+        autoResizeUI();
+      }
+
+      if (msg.type === "BACKUP_RESTORED") {
+        btnRestoreText.textContent = "Файл (.json/.zip)";
+        btnRestoreBackup.disabled = false;
+        btnRestoreFolder.disabled = false;
+        if (msg.success) {
+          const countLabel = msg.count ? ` (${msg.count} эл.)` : "";
+          const prefix = msg.isSelection ? "Выделенные элементы успешно восстановлены" : "Доска успешно восстановлена";
+          showToast(`✓ ${prefix}${countLabel}!`, 3000);
+        }
+        autoResizeUI();
+      }
+    };
+
+    if (window.parent !== window) {
+      parent.postMessage({ pluginMessage: { type: "REQUEST_DOC_INFO" } }, "*");
+      parent.postMessage({ pluginMessage: { type: "LOAD_SETTINGS" } }, "*");
+      parent.postMessage({ pluginMessage: { type: "GET_BACKUP_STATUS" } }, "*");
+      parent.postMessage({ pluginMessage: { type: "GET_SELECTION_STATUS" } }, "*");
+      pollBridge();
+      autoResizeUI();
+    }
+
+    if (window.ResizeObserver) {
+      try {
+        const ro = new ResizeObserver(() => {
+          autoResizeUI();
+        });
+        if (mainView) ro.observe(mainView);
+        if (settingsView) ro.observe(settingsView);
+      } catch (e) {}
+    }
+  </script>
+</body>
+</html>

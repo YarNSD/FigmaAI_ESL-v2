@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Secrets & Local Configs (Do NOT commit sensitive tokens)
+config.json
+.env
+.env.*
+!.env.example
+
+# Student CRM & Private Pedagogical Records (Strict Privacy Protection)
+data/students/*
+!data/students/.gitkeep
+
+# Temporary scratch scripts, dumps & logs
+scratch/
+Backups/
+artifacts/
+.cache/
+server/.cache/
+*.log
+
+*.dump
+history_dump.json
+logs_dump.json
+canvas_nodes.json
+captured_*.png
+quiz_*.png
+fill_blanks_*.png
+drag_verified.png
+*.pdf
+*_ui.html
+ui_*.html
+*guide*
+
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.gemini/
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

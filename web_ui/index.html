@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESL Figma AI — Панель управления</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">🎓</span>
+      <div>
+        <div class="logo-title">ESL Figma AI</div>
+        <div class="logo-sub">Репетитор-ассистент</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-tab="create" onclick="switchTab('create')">
+        <span class="nav-icon">💬</span> Чат и создание
+      </button>
+      <button class="nav-item" data-tab="feedback" onclick="switchTab('feedback')">
+        <span class="nav-icon">📝</span> Итоги урока
+      </button>
+      <button class="nav-item" data-tab="fast-actions" onclick="switchTab('fast-actions')">
+        <span class="nav-icon">⚡</span> Быстрые действия
+      </button>
+      <button class="nav-item" data-tab="telegram" onclick="switchTab('telegram')">
+        <span class="nav-icon">✈️</span> Telegram бот
+      </button>
+      <button class="nav-item" data-tab="boards" onclick="switchTab('boards')">
+        <span class="nav-icon">🗂️</span> Мои доски
+      </button>
+      <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+        <span class="nav-icon">⚙️</span> Настройки
+      </button>
+      <button class="nav-item" data-tab="templates" onclick="switchTab('templates')">
+        <span class="nav-icon">📐</span> Шаблоны
+      </button>
+      <button class="nav-item" data-tab="logs" onclick="switchTab('logs')">
+        <span class="nav-icon">📋</span> Журнал
+      </button>
+    </nav>
+
+    <div class="sidebar-status">
+      <div class="status-row">
+        <span class="status-dot" id="pluginDot"></span>
+        <span id="pluginLabel">Плагин не подключён</span>
+      </div>
+      <div class="status-row" style="margin-top:6px">
+        <span class="status-dot" id="apiDot"></span>
+        <span id="apiLabel">API Key не задан</span>
+      </div>
+      <div class="status-row version-row" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:4px">
+          🏷️ <span id="appVersion">v0.10.0</span>
+        </span>
+        <button id="checkUpdateBtn" class="btn-xs" style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.07);color:var(--text-2);border:1px solid rgba(255,255,255,0.1);cursor:pointer;transition:all 0.2s;" onclick="manualCheckUpdate()" title="Проверить обновления на GitHub">
+          Обновить
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main content ───────────────────────────────────────────────── -->
+  <main class="content">
+
+    <!-- OTA Update Notification Banner -->
+    <div id="updateBanner" class="update-banner" style="display:none;">
+      <div class="update-banner-content">
+        <span class="update-pulse-icon">🎉</span>
+        <div>
+          <strong id="updateBannerTitle">Доступно обновление v0.11!</strong>
+          <span id="updateBannerSub" class="update-banner-sub">Вышла новая версия проекта</span>
+        </div>
+      </div>
+      <div class="update-banner-actions">
+        <button class="btn btn-secondary btn-sm" onclick="showChangelogModal()">📋 Что нового?</button>
+        <button class="btn btn-primary btn-sm" id="btnApplyUpdate" onclick="startUpdateProcess()">🚀 Обновить сейчас</button>
+        <button class="update-banner-close" onclick="dismissUpdateBanner()" title="Скрыть">✕</button>
+      </div>
+    </div>
+
+    <!-- TAB: CREATE ──────────────────────────────────────────────────── -->
+        <!-- TAB: CHAT & CREATE ─────────────────────────────────────────── -->
+    <section class="tab active" id="tab-create">
+      <div class="tab-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h1>💬 Чат с ИИ-методистом</h1>
+          <p class="tab-sub">Обсуждайте концепцию урока, учеников и генерируйте интерактивные материалы на доске</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;color:var(--text-3)">Ученик:</label>
+          <select id="chatStudentSelect" style="padding:6px 10px;font-size:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-1)" onchange="onStudentSelectChange()">
+            <option value="">👤 Общий диалог</option>
+          </select>
+          <button class="btn btn-xs btn-outline" onclick="clearChatHistory()" title="Очистить переписку">🗑️</button>
+        </div>
+      </div>
+
+      <!-- Interactive Chat Window -->
+      <div class="chat-window-container">
+        <!-- Messages stream -->
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-bubble chat-bubble-ai">
+            <div class="chat-avatar">🎓</div>
+            <div class="chat-content">
+              <div class="chat-sender">ИИ-методист</div>
+              <div class="chat-body">
+                Здравствуйте! Я ваш персональный методист. Расскажите, какой урок или тему вы хотите подготовить, для какого ученика, или просто опишите вашу идею. Я помогу структурировать материал и нарисовать его на доске!
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick suggestion chips -->
+        <div class="chat-suggestions" id="chatSuggestions">
+          <button class="chip" onclick="sendSuggestion('Создай разминку для B1 на тему путешествий')">🗣️ Разминка B1: Путешествия</button>
+          <button class="chip" onclick="sendSuggestion('Создай квиз с картинками для A2 про динозавров')">🎯 Квиз A2: Динозавры</button>
+          <button class="chip" onclick="sendSuggestion('Подготовь словарь с переводом по теме Food and Cooking')">📚 Словарь: Еда и готовка</button>
+          <button class="chip" onclick="sendSuggestion('Собери полный комплексный урок для ученика')">🎓 Полный урок целиком</button>
+        </div>
+
+        <!-- Chat Input Bar -->
+        <div class="chat-input-bar">
+          <textarea id="chatInputText" class="chat-input" rows="2" placeholder="Напишите мне, какой урок или блок вы хотите создать... (Enter для отправки, Shift+Enter для новой строки)" onkeydown="handleChatKey(event)"></textarea>
+          <button class="btn btn-primary chat-send-btn" id="chatSendBtn" onclick="sendChatMessage()">
+            <span>🚀</span> Отправить
+          </button>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div class="divider"><span>🎨 Параметры отрисовки на холсте</span></div>
+
+      <!-- Simplified Draw Controls -->
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Тип учебного блока</label>
+          <select id="blockType" onchange="onBlockTypeChange()">
+            <option value="bloom_lesson" selected>🌟 Урок по Таксономии Блума (Bloom's Learning Arc)</option>
+            <option value="auto">🎲 Не определен (нейросеть выберет сама)</option>
+            <option value="quiz_photo">🎯 Квиз с картинками (quiz_photo)</option>
+            <option value="flip_cards">🃏 Открывашки / Peekaboo (flip_cards)</option>
+            <option value="video_quiz">🎦 Квиз по видео (video_quiz)</option>
+            <option value="vocabulary_table">📚 Словарь с переводом (vocabulary_table)</option>
+            <option value="flashcards">🗂 Карточки со словами (flashcards)</option>
+            <option value="fill_blanks">✏️ Таблица с пропусками (fill_blanks)</option>
+            <option value="speaking_cards">🗣️ Разминка / Speaking (speaking_cards)</option>
+            <option value="full_lesson">🎓 Полный урок целиком (full_lesson)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Уровень владения (CEFR)</label>
+          <div class="level-buttons">
+            <button class="level-btn" onclick="setLevel('A1')">A1</button>
+            <button class="level-btn active" onclick="setLevel('A2')">A2</button>
+            <button class="level-btn" onclick="setLevel('B1')">B1</button>
+            <button class="level-btn" onclick="setLevel('B2')">B2</button>
+            <button class="level-btn" onclick="setLevel('C1')">C1</button>
+          </div>
+        </div>
+
+        <div class="form-group form-group-full" id="ytGroup" style="display:none">
+          <label>Ссылка YouTube (для видео-квиза)</label>
+          <input id="ytInput" type="url" placeholder="https://www.youtube.com/watch?v=...">
+        </div>
+
+        <div class="form-group form-group-full">
+          <label>Активная доска Figma <a href="#" onclick="switchTab('boards'); return false;" style="font-size:11px;color:var(--accent-light)">+ управление досками</a></label>
+          <select id="boardSelect">
+            <option value="">⏳ Загрузка досок...</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:10px">
+        <button class="btn btn-primary btn-xl" id="createBtn" onclick="createFromForm()">
+          <span id="createBtnIcon">🎨</span>
+          <span id="createBtnText">Сгенерировать и нарисовать на доске</span>
+        </button>
+      </div>
+
+      <!-- Real-time Agent Live Console & Thoughts -->
+      <div class="agent-live-panel" id="agentLivePanel" style="margin-top:20px">
+        <div class="agent-live-header">
+          <div class="agent-live-title">
+            <span class="agent-pulse" id="agentLivePulse"></span>
+            <span>🧠 Ход мыслей и действий агента</span>
+          </div>
+          <div class="agent-live-actions">
+            <span id="agentStatusBadge" class="agent-status-badge">Готов к работе</span>
+            <button class="btn btn-xs btn-outline" onclick="clearLiveThoughts()" title="Очистить лог">🗑 Очистить</button>
+          </div>
+        </div>
+        <div class="agent-thoughts-stream" id="agentThoughtsStream">
+          <div class="thought-placeholder" id="thoughtPlaceholder">
+            <span>💡 Ход размышлений агента, подбор лексики и координаты отрисовки на холсте FigJam отобразятся здесь.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: FEEDBACK & DEBRIEFING ──────────────────────────────────────── -->
+    <section class="tab" id="tab-feedback">
+      <div class="tab-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h1>📝 Итоги урока (Педагогический дебрифинг)</h1>
+          <p class="tab-sub">Пошаговый живой разбор занятия: реакция на блоки (1.1, 5.2), ошибки ученика и план на след. урок</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;color:var(--text-3)">Ученик:</label>
+          <select id="feedbackStudentSelect" style="padding:6px 10px;font-size:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-1)" onchange="onFeedbackStudentSelectChange()">
+            <option value="">👤 Выберите ученика</option>
+          </select>
+          <button class="btn btn-xs btn-outline" onclick="resetFeedbackSession()" title="Начать дебрифинг заново">🔄 Сброс</button>
+        </div>
+      </div>
+
+      <div class="feedback-layout">
+        <!-- Left: Interactive debriefing chat -->
+        <div class="feedback-chat-col">
+          <div class="chat-messages" id="feedbackMessages" style="height:460px">
+            <div class="chat-bubble chat-bubble-ai">
+              <div class="chat-avatar">🎓</div>
+              <div class="chat-content">
+                <div class="chat-sender">ИИ-методист</div>
+                <div class="chat-body" id="feedbackIntroBody">
+                  📝 <b>Привет! Давай разберём, как всё прошло на практике.</b> ☕️<br><br>
+                  Назови ученика и номер блока или урока — например: <b>«Маша, блок 1.1»</b> или <b>«Вася, 5.2»</b>.<br>
+                  <i>(Можешь надиктовать голосом через микрофон ниже или написать текстом)</i>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Suggestion chips for feedback -->
+          <div class="chat-suggestions" id="feedbackSuggestions">
+            <button class="chip" onclick="sendFeedbackSuggestion('Маша, блок 1.1')">👤 Маша: Блок 1.1</button>
+            <button class="chip" onclick="sendFeedbackSuggestion('Вася, блок 5.2')">👤 Вася: Блок 5.2</button>
+            <button class="chip" onclick="sendFeedbackSuggestion('Урок целиком')">🎓 Урок целиком</button>
+          </div>
+
+          <!-- Input bar with voice & text -->
+          <div class="chat-input-bar">
+            <textarea id="feedbackInputText" class="chat-input" rows="2" placeholder="Расскажите о занятии или ответьте на вопрос ИИ... (Enter для отправки)" onkeydown="handleFeedbackKey(event)"></textarea>
+            <button class="btn btn-outline" id="feedbackRecordBtn" onclick="toggleFeedbackRecording()" title="Записать голосовое сообщение">
+              <span id="feedbackRecordIcon">🎙️</span>
+              <span id="feedbackRecordText">Голос</span>
+            </button>
+            <button class="btn btn-primary chat-send-btn" id="feedbackSendBtn" onclick="sendFeedbackMessage()">
+              <span>🚀</span> Ответить
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: Student Dossier & Lesson History -->
+        <div class="feedback-dossier-col">
+          <div class="dossier-card" id="studentDossierCard">
+            <div class="dossier-header">
+              <div class="dossier-avatar" id="dossierAvatar">👤</div>
+              <div>
+                <h3 id="dossierName" style="font-size:16px;font-weight:700">Выберите ученика</h3>
+                <span class="dossier-badge" id="dossierLevel">A1</span>
+              </div>
+            </div>
+            <div class="dossier-section">
+              <h4>🌟 Что заходит на ура (Сильные стороны)</h4>
+              <ul class="dossier-list" id="dossierStrengths">
+                <li style="color:var(--text-3)">Пока нет записей</li>
+              </ul>
+            </div>
+            <div class="dossier-section">
+              <h4>🎯 Зоны роста (Ошибки и пробелы)</h4>
+              <ul class="dossier-list" id="dossierWeaknesses">
+                <li style="color:var(--text-3)">Пока нет записей</li>
+              </ul>
+            </div>
+            <div class="dossier-section">
+              <h4>📜 Прошлые занятия и фидбеки</h4>
+              <div class="dossier-history" id="dossierHistory">
+                <div style="color:var(--text-3);font-size:12px">История уроков появится здесь</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: FAST ACTIONS ────────────────────────────────────────────── -->
+    <section class="tab" id="tab-fast-actions">
+      <div class="tab-header">
+        <h1>⚡ Быстрые действия с доской</h1>
+        <p class="tab-sub">Мгновенные команды для проведения урока и навигации по холсту</p>
+      </div>
+
+      <div class="fast-actions-grid">
+        <div class="action-card">
+          <div class="action-card-header">
+            <span class="action-card-icon">🕒</span>
+            <div>
+              <h3>Время и дата урока</h3>
+              <p>Вставляет на холст аккуратную плашку с датой и временем начала занятия.</p>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="fastInsertTimestamp()">🕒 Вставить время урока</button>
+        </div>
+
+        <div class="action-card">
+          <div class="action-card-header">
+            <span class="action-card-icon">📑</span>
+            <div>
+              <h3>Обновить оглавление</h3>
+              <p>Сканирует холст, считывает все карточки и строит интерактивное меню навигации.</p>
+            </div>
+          </div>
+          <button class="btn btn-outline" onclick="fastRefreshTOC()">🔄 Обновить меню навигации</button>
+        </div>
+
+        <div class="action-card">
+          <div class="action-card-header">
+            <span class="action-card-icon">👁️</span>
+            <div>
+              <h3>Скрыть / Показать оглавление</h3>
+              <p>Скрывает блок оглавления от учеников во время урока, чтобы не спойлерить структуру.</p>
+            </div>
+          </div>
+          <button class="btn btn-outline" onclick="fastToggleTOC()">👁️ Скрыть / Показать оглавление</button>
+        </div>
+
+        <div class="action-card">
+          <div class="action-card-header">
+            <span class="action-card-icon">🌐</span>
+            <div>
+              <h3>Открыть доску в браузере</h3>
+              <p>Открывает текущую активную доску Figma или FigJam в браузере по умолчанию.</p>
+            </div>
+          </div>
+          <button class="btn btn-outline" onclick="fastOpenBoard()">🌐 Открыть в браузере</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: TELEGRAM ────────────────────────────────────────────────── -->
+    <section class="tab" id="tab-telegram">
+      <div class="tab-header">
+        <h1>✈️ Управление Telegram-ботом</h1>
+        <p class="tab-sub">Создавайте задания и управляйте доской Figma прямо из Telegram со смартфона</p>
+      </div>
+
+      <!-- Telegram Status Banner -->
+      <div class="tg-status-banner" id="tgStatusBanner">
+        <span class="status-dot" id="tgBannerDot"></span>
+        <div style="flex:1">
+          <div id="tgBannerTitle" style="font-weight:600;font-size:14px">Статус: проверяется...</div>
+          <div id="tgBannerSub" style="font-size:12px;color:var(--text-2);margin-top:2px">Подключение к Telegram Bot API</div>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="pollTelegramStatus()">🔄 Обновить статус</button>
+      </div>
+
+      <div class="settings-grid" style="margin-top:20px">
+        <!-- Bot Switch & Token Card -->
+        <div class="settings-card">
+          <h3>🤖 Активация и Токен бота</h3>
+          
+          <div class="toggle-row" style="margin-bottom:16px">
+            <label class="toggle">
+              <input type="checkbox" id="tgToggleEnabled" onchange="onTelegramToggleChange()">
+              <span class="slider"></span>
+            </label>
+            <span style="font-weight:600;font-size:13.5px">Включить Telegram-бота</span>
+          </div>
+
+          <div class="form-group">
+            <label>HTTP API Токен бота</label>
+            <div class="input-eye">
+              <input id="tgInputToken" type="password" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ...">
+              <button class="eye-btn" type="button" onclick="toggleVisibility('tgInputToken')">👁</button>
+            </div>
+            <small style="color:var(--text-3);margin-top:4px">
+              Токен создается за 1 минуту у официального бота <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent-light)">@BotFather</a> командой <code>/newbot</code>.
+            </small>
+          </div>
+        </div>
+
+        <!-- Security Card -->
+        <div class="settings-card">
+          <h3>🔒 Безопасность и Доступ</h3>
+          <p style="color:var(--text-2);font-size:12.5px;margin-bottom:14px">
+            Защитите вашего бота от посторонних: укажите один или несколько Telegram ID через запятую. Только эти пользователи смогут давать боту команды.
+          </p>
+
+          <div class="form-group">
+            <label>Разрешённые Telegram ID (через запятую)</label>
+            <input id="tgInputAllowedIds" type="text" placeholder="Например: 123456789, 987654321">
+            <small style="color:var(--text-3);margin-top:4px">
+              Узнать свой цифровой Telegram ID можно написав боту <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent-light)">@userinfobot</a>. Если поле пустое — бот доступен всем.
+            </small>
+          </div>
+        </div>
+
+        <!-- Proxy Settings Card -->
+        <div class="settings-card settings-card-full">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+            <h3 style="margin-bottom:0">🌐 Прокси-сервер (SOCKS5 / HTTP для обхода блокировок)</h3>
+            <div class="toggle-row" style="margin-bottom:0">
+              <label class="toggle">
+                <input type="checkbox" id="tgToggleProxy" onchange="toggleProxyFields()">
+                <span class="slider"></span>
+              </label>
+              <span style="font-weight:600;font-size:13.5px">Включить прокси</span>
+            </div>
+          </div>
+          <p style="color:var(--text-2);font-size:12.5px;margin-bottom:16px">
+            В РФ прямой доступ к <code>api.telegram.org</code> заблокирован провайдерами. Укажите адрес локального или удаленного SOCKS5 / HTTP прокси (например, v2ray, Xray, Clash, Shadowsocks: <code>127.0.0.1:2080</code> или <code>127.0.0.1:1080</code>).
+          </p>
+
+          <div id="proxyFieldsContainer" style="display:grid;grid-template-columns:140px 1fr 120px;gap:14px;align-items:start">
+            <div class="form-group">
+              <label>Протокол</label>
+              <select id="tgProxyProtocol">
+                <option value="socks5" selected>SOCKS5</option>
+                <option value="http">HTTP</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Хост / IP-адрес</label>
+              <input id="tgProxyHost" type="text" placeholder="127.0.0.1" value="127.0.0.1">
+            </div>
+
+            <div class="form-group">
+              <label>Порт</label>
+              <input id="tgProxyPort" type="number" placeholder="2080" value="2080">
+            </div>
+          </div>
+
+          <div id="proxyAuthContainer" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px">
+            <div class="form-group">
+              <label>Логин (если требуется авторизация)</label>
+              <input id="tgProxyUser" type="text" placeholder="Необязательно">
+            </div>
+            <div class="form-group">
+              <label>Пароль</label>
+              <div class="input-eye">
+                <input id="tgProxyPassword" type="password" placeholder="Необязательно">
+                <button class="eye-btn" type="button" onclick="toggleVisibility('tgProxyPassword')">👁</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:20px">
+        <button class="btn btn-primary btn-lg" id="btnSaveTelegram" onclick="saveTelegramSettings()">
+          <span>💾</span> Сохранить и применить настройки
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB: SETTINGS ──────────────────────────────────────────────── -->
+    <section class="tab" id="tab-settings">
+      <div class="tab-header">
+        <h1>⚙️ Настройки</h1>
+        <p class="tab-sub">Конфигурация API, досок и Telegram</p>
+      </div>
+
+      <div class="settings-grid">
+        <!-- AI settings -->
+        <div class="settings-card">
+          <h3>⚡ Движок ИИ (AI Engine)</h3>
+          <div class="form-group">
+            <label>Среда запуска агентов</label>
+            <select id="engineSelect" onchange="toggleEngineSettings()">
+              <option value="antigravity" selected>Google Antigravity CLI (Локальный агент на ПК, без API-ключей)</option>
+              <option value="gemini_api">Google Gemini API (через API-ключ)</option>
+            </select>
+            <small id="engineNotice" style="color:var(--accent-light);display:block;margin-top:6px">
+              ✅ Агенты работают локально через Antigravity CLI (agy) на вашем компьютере. API-ключи не требуются!
+            </small>
+          </div>
+          <div class="form-group">
+            <label>Модель генерации</label>
+            <select id="modelSelect">
+              <option value="gemini-3.7-flash-medium">Gemini 3.7 Flash (Medium) — Стабильная и быстрая (Рекомендуется)</option>
+              <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash (Medium) — Экспериментальная (бывают 503)</option>
+              <option value="gemini-3.8-flash-high">Gemini 3.8 Flash (High) — Максимальное качество</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Thinking) — Глубокое рассуждение</option>
+              <option value="gpt-oss-120b-medium">GPT-OSS 120B (Medium)</option>
+            </select>
+          </div>
+          <div class="form-group" id="apiKeyGroup" style="display:none">
+            <label>Gemini API Key (только для режима Google API)</label>
+            <div class="input-eye">
+              <input id="apiKeyInput" type="password" placeholder="AIzaSy...">
+              <button class="eye-btn" onclick="toggleVisibility('apiKeyInput')">👁</button>
+            </div>
+            <small>Получить: <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></small>
+          </div>
+        </div>
+
+
+        <!-- Figma boards shortcut -->
+        <div class="settings-card">
+          <h3>🎨 Доски Figma</h3>
+          <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Управление досками вынесено в отдельный раздел.</p>
+          <button class="btn btn-outline" onclick="switchTab('boards')">🗂️ Открыть «Мои доски»</button>
+          <button class="btn btn-outline" onclick="refreshTOC()" style="margin-top:8px">🔄 Обновить оглавление</button>
+        </div>
+
+        <!-- Telegram -->
+        <div class="settings-card settings-card-full">
+          <h3>✈️ Telegram (опционально)</h3>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" id="tgEnabled" onchange="toggleTelegram()">
+              <span class="slider"></span>
+            </label>
+            <span>Включить Telegram-бот</span>
+          </div>
+          <div id="tgSettings" style="display:none">
+            <div class="form-group" style="margin-top:16px">
+              <label>Bot Token</label>
+              <div class="input-eye">
+                <input id="tgToken" type="password" placeholder="123456789:ABCdef...">
+                <button class="eye-btn" onclick="toggleVisibility('tgToken')">👁</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Разрешённые Telegram ID (через запятую)</label>
+              <input id="tgIds" type="text" placeholder="123456789, 987654321">
+            </div>
+            <div class="form-group">
+              <label>Прокси SOCKS5 (для обхода блокировок)</label>
+              <div class="proxy-row">
+                <input id="proxyHost" type="text" placeholder="127.0.0.1" style="flex:2">
+                <input id="proxyPort" type="number" placeholder="1080" style="flex:1">
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="testTelegram()">🔌 Проверить соединение</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Сохранить настройки</button>
+        <div id="settingsResult" class="inline-result"></div>
+      </div>
+    </section>
+
+    <!-- TAB: BOARDS ──────────────────────────────────────────────────── -->
+    <section class="tab" id="tab-boards">
+      <div class="tab-header">
+        <h1>🗂️ Мои доски Figma</h1>
+        <p class="tab-sub">Добавляйте доски по названию — агент автоматически переключится на нужную по команде</p>
+      </div>
+
+      <!-- Active board banner -->
+      <div id="activeBoardBanner" class="active-board-banner">
+        <span class="banner-dot"></span>
+        <span id="activeBoardName">Нет активной доски</span>
+        <span id="activeBoardType" class="board-type-badge"></span>
+      </div>
+
+      <!-- Add board form -->
+      <div class="settings-card" style="margin-bottom:20px">
+        <h3>➕ Добавить доску</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Название доски <span style="color:var(--text-muted)">*</span></label>
+            <input id="newBoardName" type="text" placeholder="Репетиторство">
+            <small>Это имя вы будете использовать в командах: «создай на <b>Репетиторство</b> квиз...»</small>
+          </div>
+          <div class="form-group form-group-full">
+            <label>Ссылка на доску Figma <span style="color:var(--text-muted)">*</span></label>
+            <input id="newBoardUrl" type="url" placeholder="https://www.figma.com/board/... или /design/...">
+            <small id="boardTypeHint" style="color:var(--accent)"></small>
+          </div>
+          <div class="form-group form-group-full">
+            <label>Псевдонимы (через запятую, необязательно)</label>
+            <input id="newBoardAliases" type="text" placeholder="репет, tutoring, основная">
+            <small>Дополнительные слова для распознавания этой доски из команд</small>
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:12px">
+          <button class="btn btn-primary" onclick="addBoard()">➕ Добавить доску</button>
+          <div id="boardAddResult" class="inline-result"></div>
+        </div>
+      </div>
+
+      <!-- Boards list -->
+      <div id="boardsList" class="boards-list">
+        <div class="boards-loading">⏳ Загрузка досок...</div>
+      </div>
+    </section>
+
+    <!-- TAB: TEMPLATES ─────────────────────────────────────────────── -->
+    <section class="tab" id="tab-templates">
+      <div class="tab-header">
+        <h1>📐 Шаблоны блоков</h1>
+        <p class="tab-sub">Все типы блоков, которые агент умеет создавать</p>
+      </div>
+
+      <div class="templates-grid">
+        <div class="template-card" onclick="quickCreate('quiz_photo')">
+          <div class="template-icon">🎯</div>
+          <div class="template-name">Квиз с картинками</div>
+          <div class="template-desc">Вопрос + фото + 3 варианта ответа A/B/C</div>
+          <div class="template-meta">Уровни: A1–B2 · До 15 вопросов</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+
+        <div class="template-card" onclick="quickCreate('flip_cards')">
+          <div class="template-icon">🃏</div>
+          <div class="template-name">Открывашки</div>
+          <div class="template-desc">Карточки с картинкой, раскрываются по клику с вопросом</div>
+          <div class="template-meta">Уровни: A1–B2 · До 16 карточек</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+
+        <div class="template-card" onclick="quickCreate('video_quiz')">
+          <div class="template-icon">🎬</div>
+          <div class="template-name">Квиз по видео</div>
+          <div class="template-desc">YouTube + вопросы по содержанию + словарь</div>
+          <div class="template-meta">Уровни: A2–C1 · Нужна ссылка YouTube</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+
+        <div class="template-card" onclick="quickCreate('vocabulary_table')">
+          <div class="template-icon">📚</div>
+          <div class="template-name">Словарь с переводом</div>
+          <div class="template-desc">Таблица: слово + транскрипция + перевод + пример</div>
+          <div class="template-meta">Уровни: A1–C1 · До 20 слов</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+
+        <div class="template-card" onclick="quickCreate('flashcards')">
+          <div class="template-icon">🗂</div>
+          <div class="template-name">Простые карточки</div>
+          <div class="template-desc">Слово / перевод / транскрипция / пример</div>
+          <div class="template-meta">Уровни: A1–B2 · До 20 карточек</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+
+        <div class="template-card" onclick="quickCreate('fill_blanks')">
+          <div class="template-icon">✏️</div>
+          <div class="template-name">Таблица с пропусками</div>
+          <div class="template-desc">Предложения с ___ для заполнения + банк слов</div>
+          <div class="template-meta">Уровни: A2–B2 · До 15 предложений</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+
+        <div class="template-card" onclick="quickCreate('speaking_cards')">
+          <div class="template-icon">🗣️</div>
+          <div class="template-name">Разминка / Speaking Cards</div>
+          <div class="template-desc">Карточки с вопросами для запуска урока + картинки</div>
+          <div class="template-meta">Уровни: A1–C1 · До 15 карточек</div>
+          <button class="btn btn-sm btn-primary template-btn">Создать →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: LOGS ──────────────────────────────────────────────────── -->
+    <section class="tab" id="tab-logs">
+      <div class="tab-header">
+        <h1>📋 Журнал операций</h1>
+        <p class="tab-sub">Лог всех действий агентов в реальном времени</p>
+      </div>
+      <div class="log-toolbar">
+        <button class="btn btn-sm btn-outline" onclick="clearLogs()">🗑 Очистить</button>
+        <span id="logCount" class="log-count">0 записей</span>
+      </div>
+      <div class="log-container" id="logContainer"></div>
+    </section>
+
+  </main>
+  <!-- ── MODAL: UPDATE / CHANGELOG ──────────────────────────────────── -->
+  <div class="modal-overlay" id="updateModal" style="display:none;">
+    <div class="modal modal-md" style="max-width: 580px; width: 92%;">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:24px;">🚀</span>
+          <div>
+            <h2 class="modal-title" id="updateModalTitle" style="margin:0;font-size:18px;">Обновление FigmaAI</h2>
+            <div style="font-size:12px;color:var(--text-3);" id="updateModalVersionInfo">Версия: v0.10.0 ➔ v0.11.0</div>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeUpdateModal()">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 16px 20px;">
+        <!-- Changelog view -->
+        <div id="updateChangelogSection">
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px;">
+            📝 Список изменений (Changelog):
+          </div>
+          <div id="updateChangelogText" class="update-changelog-box" style="background:var(--bg-3);border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-height:220px;overflow-y:auto;font-size:13px;line-height:1.6;color:var(--text-1);white-space:pre-wrap;"></div>
+          
+          <div style="margin-top:14px;padding:12px;border-radius:8px;background:rgba(37,99,235,0.08);border:1px solid rgba(37,99,235,0.2);display:flex;gap:10px;font-size:12px;color:var(--text-2);line-height:1.5;">
+            <span style="font-size:16px;">🛡️</span>
+            <div>Все ваши ученики (Student CRM), доски и персональные настройки <strong>полностью сохранятся</strong> при обновлении.</div>
+          </div>
+        </div>
+
+        <!-- Progress/Log view (hidden initially) -->
+        <div id="updateProgressSection" style="display:none;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <div class="spinner" id="updateSpinner" style="width:20px;height:20px;"></div>
+            <span id="updateStatusText" style="font-size:14px;font-weight:600;color:var(--accent);">Установка обновления...</span>
+          </div>
+          <div id="updateConsoleLogs" class="update-console-box" style="background:#0a0d14;border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-height:200px;overflow-y:auto;font-family:Consolas, monospace;font-size:11px;color:#a5f3fc;line-height:1.7;"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding:14px 20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);">
+        <button class="btn btn-secondary" id="updateCancelBtn" onclick="closeUpdateModal()">Закрыть</button>
+        <button class="btn btn-primary" id="updateConfirmBtn" onclick="startUpdateProcess()">🚀 Обновить сейчас</button>
+        <button class="btn btn-success" id="updateReloadBtn" style="display:none;" onclick="location.reload()">🔄 Перезагрузить страницу</button>
+      </div>
+    </div>
+  </div>
+
+<script src="app.js"></script>
+  <div id="toastContainer" class="toast-container"></div>
+</body>
+</html>
