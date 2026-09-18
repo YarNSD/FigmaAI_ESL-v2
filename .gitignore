@@ -55,7 +55,8 @@ drag_verified.png
 *.pdf
 *_ui.html
 ui_*.html
-*guide*
+*guide*.html
+!.antigravity/tech_stack_guidelines.md
 
 
 # IDE & Editor files
