@@ -41,17 +41,20 @@ exit /b 1
 
 :python_found
 
-:: 2. Проверка Antigravity CLI (agy)
+:: 2. Проверка Antigravity IDE (для работы ИИ без API-ключей)
+set "AGY_FOUND="
+if exist "%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe" set "AGY_FOUND=1"
+if exist "%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe" set "AGY_FOUND=1"
+if exist "%ProgramFiles%\Antigravity IDE\Antigravity IDE.exe" set "AGY_FOUND=1"
 where agy >nul 2>&1
-if errorlevel 1 goto :no_agy
-echo [+] Antigravity CLI обнаружен в системе.
-goto :after_agy
+if not errorlevel 1 set "AGY_FOUND=1"
 
-:no_agy
-echo [i] Antigravity CLI (agy) не найден в PATH.
-echo     Будет использоваться Gemini API Key или запущенная Antigravity IDE.
-
-:after_agy
+if defined AGY_FOUND (
+    echo [+] Antigravity IDE обнаружен в системе.
+) else (
+    echo [i] Antigravity IDE не найден. Для бесплатной работы ИИ без API-ключей
+    echo     запустите Antigravity IDE и войдите под вашим Google-аккаунтом.
+)
 
 :: 3. Активация виртуального окружения (.venv)
 if exist ".venv\Scripts\activate.bat" goto :activate_venv

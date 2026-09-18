@@ -938,14 +938,14 @@
         <span id="currentStatusBadge" class="mini-status">...</span>
       </div>
       <div class="input-wrap">
-        <input id="inputServerUrl" class="server-input" type="text" placeholder="192.168.1.2:45678" spellcheck="false" autocomplete="off" />
+        <input id="inputServerUrl" class="server-input" type="text" placeholder="localhost:45678" spellcheck="false" autocomplete="off" />
         <button id="btnClearInput" class="btn-clear" title="Очистить поле">✕</button>
       </div>
 
       <div class="chips-row">
         <span class="chip-hint">Быстро:</span>
         <button type="button" class="chip-btn" id="chipLocalhost">localhost</button>
-        <button type="button" class="chip-btn" id="chipLanIp">192.168.1.2</button>
+        <button type="button" class="chip-btn" id="chipLanIp">127.0.0.1</button>
       </div>
 
       <div class="settings-actions-row">
@@ -1130,8 +1130,8 @@
     let BRIDGE_URL = normalizeServerUrl(savedInitialUrl || "http://localhost:45678");
     let API_URL = BRIDGE_URL.replace(":45678", ":3000");
     const CANDIDATE_BRIDGE_URLS = [
-      "http://192.168.1.2:45678",
-      "http://localhost:45678"
+      "http://localhost:45678",
+      "http://127.0.0.1:45678"
     ];
 
     // ── DOM Elements ────────────────────────────────────────────────────────
@@ -1983,7 +1983,7 @@
     });
 
     chipLanIp.addEventListener("click", () => {
-      inputServerUrl.value = "http://192.168.1.2:45678";
+      inputServerUrl.value = "http://127.0.0.1:45678";
     });
 
     inputServerUrl.addEventListener("keydown", (e) => {
