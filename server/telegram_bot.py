@@ -465,21 +465,32 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if result.get("ok"):
             title = result.get("title", "Фото-упражнение")
+            warnings = result.get("warnings", [])
+            warn_block = ""
+            if warnings:
+                warn_lines = "\n".join(f"• _{w}_" for w in warnings)
+                warn_block = f"\n\n⚠️ *Обратите внимание:*\n{warn_lines}\n_Элементы можно скорректировать прямо на доске._"
+
             await query.edit_message_text(
                 f"✅ *Готово! Блок успешно нарисован на доске с вашими фото!*\n\n"
                 f"📋 *Название:* «{title}»\n"
                 f"📸 *Использовано фото:* {len(staged)} шт.\n"
                 f"👤 *Ученик:* {sname}\n"
-                f"🎨 *Доска:* {bname}",
+                f"🎨 *Доска:* {bname}"
+                f"{warn_block}",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]]),
                 parse_mode="Markdown"
             )
             context.user_data.pop("staged_photos", None)
         else:
-            err = result.get("message", "Сбой создания")
+            tech_err = result.get("technical_error") or result.get("message") or "Сбой создания"
+            safe_err = str(tech_err).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
             await query.edit_message_text(
-                f"❌ Ошибка создания: {err}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]])
+                f"❌ *Техническая ошибка создания:*\n\n"
+                f"🔧 *Причина:* {safe_err}\n\n"
+                f"💡 *Рекомендация:* проверьте подключение плагина в Figma и повторите запрос.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]]),
+                parse_mode="Markdown"
             )
         return
 
@@ -1116,12 +1127,19 @@ async def execute_creation(
             context.user_data.pop("staged_photos", None)
             title = result.get("title", command or "Задание")
             res_lvl = result.get("level", level or "A2")
+            warnings = result.get("warnings", [])
+            warn_block = ""
+            if warnings:
+                warn_lines = "\n".join(f"• _{w}_" for w in warnings)
+                warn_block = f"\n\n⚠️ *Обратите внимание:*\n{warn_lines}\n_Элементы можно скорректировать прямо на доске._"
+
             reply_text = (
                 f"✅ *Готово! Блок успешно нарисован на доске!*\n\n"
                 f"📋 *Название:* «{title}»\n"
                 f"🎯 *Уровень:* [{res_lvl}]\n"
                 f"👤 *Ученик:* {sname}\n"
                 f"🎨 *Доска:* {bname}"
+                f"{warn_block}"
             )
             back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]])
             if status_msg:
@@ -1130,14 +1148,22 @@ async def execute_creation(
                 except Exception:
                     await status_msg.edit_text(reply_text, reply_markup=back_kb)
         else:
-            err = str(result.get("message", "Произошла ошибка при создании"))
+            tech_err = result.get("technical_error") or result.get("message") or "Произошла ошибка при создании"
+            safe_err = str(tech_err).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
             back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]])
+            err_text = (
+                f"❌ *Техническая ошибка создания:*\n\n"
+                f"🔧 *Причина:* {safe_err}\n\n"
+                f"💡 *Рекомендация:*\n"
+                f"• Проверьте, что Figma открыта и плагин запущен на доске\n"
+                f"• Убедитесь, что индикатор в плагине зелёный\n"
+                f"• Попробуйте повторить запрос"
+            )
             if status_msg:
                 try:
-                    safe_err = err.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
-                    await status_msg.edit_text(f"❌ *Ошибка:*\n{safe_err}", reply_markup=back_kb, parse_mode="Markdown")
+                    await status_msg.edit_text(err_text, reply_markup=back_kb, parse_mode="Markdown")
                 except Exception:
-                    await status_msg.edit_text(f"❌ Ошибка:\n{err}", reply_markup=back_kb)
+                    await status_msg.edit_text(err_text, reply_markup=back_kb)
 
     except Exception as e:
         logger.error(f"Telegram execution error: {e}", exc_info=True)

@@ -23,6 +23,22 @@ logger = logging.getLogger("image_agent")
 # Cache query -> base64 string
 _IMAGE_CACHE: dict[str, str] = {}
 
+# Warning collector for current batch
+_LAST_BATCH_WARNINGS: list[str] = []
+
+
+def add_warning(msg: str):
+    global _LAST_BATCH_WARNINGS
+    if msg and msg not in _LAST_BATCH_WARNINGS:
+        _LAST_BATCH_WARNINGS.append(msg)
+
+
+def get_and_clear_warnings() -> list[str]:
+    global _LAST_BATCH_WARNINGS
+    w = list(_LAST_BATCH_WARNINGS)
+    _LAST_BATCH_WARNINGS = []
+    return w
+
 # Rate limit semaphore for generative AI endpoints (Pollinations)
 _POLLINATIONS_SEMAPHORE = asyncio.Semaphore(1)
 _LAST_POLLINATIONS_TIME = 0.0
@@ -307,10 +323,12 @@ async def _generate_pollinations(
                 return resp.content
             elif resp.status_code == 429:
                 logger.warning(f"Pollinations 429 for '{query}' — immediately falling back to search")
+                add_warning("Сервис AI-генерации картинок временно перегружен (лимит 429), иллюстрации подобраны через поиск фото.")
             else:
                 logger.warning(f"Pollinations HTTP {resp.status_code} for '{query}'")
         except Exception as e:
             logger.warning(f"Pollinations failed/timed out for '{query}': {e}")
+            add_warning("Служба AI-генерации картинок не ответила вовремя, задействован резервный поиск фото.")
         finally:
             _LAST_POLLINATIONS_TIME = loop.time()
     return None
@@ -482,9 +500,21 @@ async def resolve_batch_images(
                 return {**item, "image_base64": b64}
             return {**item, "image_base64": ""}
 
+    get_and_clear_warnings()
     tasks = [_resolve_single(idx, item) for idx, item in enumerate(items, 1)]
     updated_items = list(await asyncio.gather(*tasks))
     success_count = sum(1 for it in updated_items if it.get("image_base64"))
+    if success_count < total:
+        add_warning(f"Для {total - success_count} карточек не удалось загрузить иллюстрации (использованы запасные заглушки).")
+
+    if _LAST_BATCH_WARNINGS:
+        agent_logger.emit_log(
+            stage="warning",
+            icon="⚠️",
+            title="Особенности картинок",
+            message=_LAST_BATCH_WARNINGS[0],
+            detail="Задание продолжается с доступными визуальными материалами"
+        )
 
     agent_logger.emit_log(
         stage="generating",

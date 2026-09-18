@@ -18,6 +18,14 @@ def _design() -> dict:
     }
 
 
+def _finalize_result(result: dict) -> dict:
+    warnings = image_agent.get_and_clear_warnings()
+    if warnings:
+        existing = result.get("warnings", [])
+        result["warnings"] = list(dict.fromkeys(existing + warnings))
+    return result
+
+
 async def draw_quiz_photo(content: dict) -> dict:
     """Draw photo quiz (Type 1). Resolves images per-question via ImageAgent."""
     logger.info(f"Drawing quiz_photo: {content.get('title')}")
@@ -47,9 +55,9 @@ async def draw_quiz_photo(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("quiz_photo", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("quiz_photo", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)
 
 
 async def draw_flip_cards(content: dict) -> dict:
@@ -76,9 +84,9 @@ async def draw_flip_cards(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("flip_cards", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("flip_cards", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)
 
 
 async def draw_video_quiz(content: dict) -> dict:
@@ -100,9 +108,9 @@ async def draw_video_quiz(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("video_quiz", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("video_quiz", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)
 
 
 async def draw_vocabulary_table(content: dict) -> dict:
@@ -134,9 +142,9 @@ async def draw_vocabulary_table(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("vocabulary_table", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("vocabulary_table", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)
 
 
 async def draw_flashcards(content: dict) -> dict:
@@ -156,9 +164,9 @@ async def draw_flashcards(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("flashcards", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("flashcards", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)
 
 
 async def draw_fill_blanks(content: dict) -> dict:
@@ -179,9 +187,9 @@ async def draw_fill_blanks(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("fill_blanks", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("fill_blanks", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)
 
 
 async def draw_speaking_cards(content: dict) -> dict:
@@ -208,6 +216,6 @@ async def draw_speaking_cards(content: dict) -> dict:
     }, timeout=90.0)
 
     if result.get("ok") and result.get("nodeId"):
-        await toc_agent.register_block("speaking_cards", content["title"], result["nodeId"])
+        asyncio.create_task(toc_agent.register_block("speaking_cards", content["title"], result["nodeId"]))
 
-    return result
+    return _finalize_result(result)

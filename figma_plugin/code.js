@@ -1308,6 +1308,18 @@ function getViewportCenter(width = 160, height = 160) {
   }
 }
 
+function isNodeValidForCanvasBounds(child) {
+  if (!child) return false;
+  if (child.visible === false) return false;
+  if (child.getPluginData && child.getPluginData("role") === "board_backup") return false;
+  if (child.name && (child.name.startsWith("🔒 [РЕЗЕРВНАЯ КОПИЯ") || child.name.startsWith("🔒 [БЭКАП") || child.name.includes("РЕЗЕРВНАЯ КОПИЯ"))) return false;
+  if (typeof child.x !== "number" || typeof child.y !== "number") return false;
+  if (isNaN(child.x) || isNaN(child.y)) return false;
+  // Discard crazy outliers (e.g. backup or test nodes placed at -999999 or distant infinity)
+  if (child.x < -40000 || child.x > 400000 || child.y < -40000 || child.y > 400000) return false;
+  return true;
+}
+
 function getCanvasBounds() {
   const children = figma.currentPage.children;
   if (!children || children.length === 0) return null;
@@ -1316,9 +1328,9 @@ function getCanvasBounds() {
   let hasValid = false;
 
   for (const child of children) {
-    if (typeof child.x === "number" && typeof child.y === "number") {
-      const w = child.width || 0;
-      const h = child.height || 0;
+    if (isNodeValidForCanvasBounds(child)) {
+      const w = Math.max(0, child.width || 0);
+      const h = Math.max(0, child.height || 0);
       minX = Math.min(minX, child.x);
       minY = Math.min(minY, child.y);
       maxX = Math.max(maxX, child.x + w);
@@ -1331,40 +1343,117 @@ function getCanvasBounds() {
 }
 
 function findSmartNonOverlappingPosition(width = 180, height = 180, placement = "AUTO") {
-  const bounds = getCanvasBounds();
-  if (!bounds) {
-    return getViewportCenter(width, height);
-  }
-
   const gap = 100;
+  
+  // 1. Priority 1: User's explicit canvas selection
+  const sel = figma.currentPage.selection || [];
+  const validSel = sel.filter(isNodeValidForCanvasBounds);
+  if (validSel.length > 0) {
+    let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
+    for (const n of validSel) {
+      sMinX = Math.min(sMinX, n.x);
+      sMinY = Math.min(sMinY, n.y);
+      sMaxX = Math.max(sMaxX, n.x + (n.width || 0));
+      sMaxY = Math.max(sMaxY, n.y + (n.height || 0));
+    }
+    if (placement === "BOTTOM") {
+      return { x: Math.round(sMinX), y: Math.round(sMaxY + gap) };
+    }
+    return { x: Math.round(sMaxX + gap), y: Math.round(sMinY) };
+  }
 
-  if (placement === "RIGHT") {
+  // 2. Priority 2: Teacher's active Viewport
+  let vp = null;
+  try {
+    if (figma.viewport && figma.viewport.center) {
+      vp = {
+        x: figma.viewport.center.x,
+        y: figma.viewport.center.y,
+        zoom: figma.viewport.zoom || 1
+      };
+    }
+  } catch (_) {}
+
+  if (vp && !isNaN(vp.x) && !isNaN(vp.y) && vp.x > -40000 && vp.x < 400000 && vp.y > -40000 && vp.y < 400000) {
+    const validChildren = (figma.currentPage.children || []).filter(isNodeValidForCanvasBounds);
+    
+    // Find valid nodes near viewport center (within 3000px)
+    const nearNodes = validChildren.filter(n => {
+      const cx = n.x + (n.width || 0) / 2;
+      const cy = n.y + (n.height || 0) / 2;
+      return Math.hypot(cx - vp.x, cy - vp.y) < 3000;
+    });
+
+    if (nearNodes.length > 0) {
+      // Find the rightmost node in this viewport cluster
+      let rightmost = nearNodes[0];
+      for (const n of nearNodes) {
+        if ((n.x + (n.width || 0)) > (rightmost.x + (rightmost.width || 0))) {
+          rightmost = n;
+        }
+      }
+      if (placement === "BOTTOM") {
+        let bottommost = nearNodes[0];
+        for (const n of nearNodes) {
+          if ((n.y + (n.height || 0)) > (bottommost.y + (bottommost.height || 0))) {
+            bottommost = n;
+          }
+        }
+        return {
+          x: Math.round(bottommost.x),
+          y: Math.round(bottommost.y + (bottommost.height || 0) + gap)
+        };
+      }
+      return {
+        x: Math.round(rightmost.x + (rightmost.width || 0) + gap),
+        y: Math.round(rightmost.y)
+      };
+    }
+
+    // If no nodes near viewport center, place directly in the center of the teacher's screen!
+    return {
+      x: Math.round(vp.x - width / 2),
+      y: Math.round(vp.y - height / 2)
+    };
+  }
+
+  // 3. Priority 3: Fallback to existing ESL blocks on the canvas
+  const eslBlocks = (figma.currentPage.children || []).filter(n =>
+    isNodeValidForCanvasBounds(n) && (
+      (n.getPluginData && n.getPluginData("role") === "esl_activity_block") ||
+      (n.type === "GROUP" && n.name && (n.name.includes("Interactive Block") || n.name.includes("Quiz") || n.name.includes("Lesson") || n.name.includes("УРОК")))
+    )
+  );
+
+  if (eslBlocks.length > 0) {
+    let lastBlock = eslBlocks[0];
+    for (const b of eslBlocks) {
+      if ((b.x + (b.width || 0)) > (lastBlock.x + (lastBlock.width || 0))) {
+        lastBlock = b;
+      }
+    }
+    return {
+      x: Math.round(lastBlock.x + (lastBlock.width || 0) + gap),
+      y: Math.round(lastBlock.y)
+    };
+  }
+
+  // 4. Global bounds fallback
+  const bounds = getCanvasBounds();
+  if (bounds) {
+    if (placement === "BOTTOM" || width >= 500) {
+      return {
+        x: Math.round(bounds.minX),
+        y: Math.round(bounds.maxY + gap)
+      };
+    }
     return {
       x: Math.round(bounds.maxX + gap),
-      y: Math.round(bounds.minY)
+      y: Math.round((bounds.minY + bounds.maxY) / 2 - height / 2)
     };
   }
 
-  if (placement === "BOTTOM" || width >= 500) {
-    // Large blocks (tables, quiz, flows) are placed cleanly below existing content
-    return {
-      x: Math.round(bounds.minX),
-      y: Math.round(bounds.maxY + gap)
-    };
-  }
-
-  // Auto for smaller items: place to right if screen is narrow, else place below
-  if (bounds.height > bounds.width * 1.2) {
-    return {
-      x: Math.round(bounds.maxX + gap),
-      y: Math.round(bounds.minY)
-    };
-  } else {
-    return {
-      x: Math.round(bounds.minX),
-      y: Math.round(bounds.maxY + gap)
-    };
-  }
+  return getViewportCenter(width, height);
 }
 
 function connectNodes(fromNode, toNode, startMagnet = "BOTTOM", endMagnet = "TOP") {
@@ -2208,28 +2297,45 @@ function getNextBlockPosition(estW = 1600, estH = 1000) {
 }
 
 function _eslGetOrigin(estW = 1400, estH = 800, params = null) {
+  let pos;
   if (params && params.replaceNodeId) {
     const oldNode = figma.getNodeById(params.replaceNodeId);
-    if (oldNode) {
-      const orig = { x: oldNode.x, y: oldNode.y };
+    if (oldNode && isNodeValidForCanvasBounds(oldNode)) {
+      const orig = { x: Math.round(oldNode.x), y: Math.round(oldNode.y) };
       setTimeout(() => {
         try { oldNode.remove(); } catch (e) { }
       }, 50);
       return orig;
     }
   }
-  if (params && params.x !== undefined && params.y !== undefined) {
-    return { x: params.x, y: params.y };
+  if (params && typeof params.x === "number" && typeof params.y === "number") {
+    pos = { x: Math.round(params.x), y: Math.round(params.y) };
+  } else {
+    pos = findSmartNonOverlappingPosition(estW, estH, 'RIGHT');
   }
-  return findSmartNonOverlappingPosition(estW, estH, 'RIGHT');
+
+  // Strict clamp: Coordinates must NEVER be outside realistic canvas dimensions
+  if (pos.x < -40000 || pos.x > 400000 || pos.y < -40000 || pos.y > 400000 || isNaN(pos.x) || isNaN(pos.y)) {
+    console.warn("Out-of-bounds coordinates detected:", pos, "resetting to viewport center");
+    pos = getViewportCenter(estW, estH);
+  }
+  return pos;
 }
 
 function _eslScrollTo(nodes) {
-  // User explicit requirement: Keep screen/viewport static, never shift or zoom camera on block creation!
   try {
     const grp = nodes.find(n => n && (n.type === 'GROUP' || n.type === 'SECTION')) || nodes[0];
     if (grp) {
       figma.currentPage.selection = [grp];
+      if (figma.viewport && figma.viewport.center) {
+        const vp = figma.viewport.center;
+        const zoom = figma.viewport.zoom || 1;
+        const dist = Math.hypot(grp.x + (grp.width || 0) / 2 - vp.x, grp.y + (grp.height || 0) / 2 - vp.y);
+        // If distance on screen is large (> 1200px) or node is out of sight, scroll to it so teacher sees it
+        if (dist * zoom > 1200 || dist > 3500) {
+          figma.viewport.scrollAndZoomIntoView([grp]);
+        }
+      }
     }
   } catch (e) { }
 }
@@ -2449,7 +2555,7 @@ async function drawESLQuizPhoto(params) {
   }
   _eslScrollTo(nodes);
   figma.notify('✅ Quiz photo created!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(finalTotalH) };
 }
 
 async function drawESLFlipCards(params) {
@@ -2700,7 +2806,7 @@ async function drawESLFlipCards(params) {
   }
   _eslScrollTo(nodes);
   figma.notify('✅ Интерактивные открывашки созданы!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(BLOCK_H) };
 }
 
 // ─── drawESLVideoQuiz (Nordic Pastel Theme) ──────────────────────────────────────────────────────
@@ -2863,7 +2969,7 @@ async function drawESLVideoQuiz(params) {
   }
   _eslScrollTo(nodes);
   figma.notify('✅ Video quiz block created!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(BLOCK_H) };
 }
 
 // ─── drawESLVocabularyTable (Light Worksheet Theme) ────────────────────────
@@ -3012,7 +3118,7 @@ async function drawESLVocabularyTable(params) {
   if (grp) { grp.setPluginData('role', 'esl_activity_block'); grp.setPluginData('created_at', String(Date.now())); }
   _eslScrollTo(nodes);
   figma.notify('✅ Vocabulary table created!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(BLOCK_H) };
 }
 
 // ─── drawESLFlashcards (Nordic Pastel Theme) ─────────────────────────────
@@ -3205,7 +3311,7 @@ async function drawESLFlashcards(params) {
   }
   _eslScrollTo(nodes);
   figma.notify('✅ Flashcards created!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(BLOCK_H) };
 }
 
 // ─── drawESLFillBlanks (Nordic Pastel Theme) ────────────────────────────
@@ -3397,7 +3503,7 @@ async function drawESLFillBlanks(params) {
   }
   _eslScrollTo(nodes);
   figma.notify('✅ Fill-in-the-blanks created!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(finalTotalH) };
 }
 
 // ─── drawESLSpeakingCards (Warmup / Speaking Cards — Light Theme) ──────────
@@ -3594,7 +3700,7 @@ async function drawESLSpeakingCards(params) {
   }
   _eslScrollTo(nodes);
   figma.notify('✅ Speaking cards created!', { timeout: 2500 });
-  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id) };
+  return { ok: true, success: true, nodeId: grp ? grp.id : (nodes[0] && nodes[0].id), x: Math.round(grp ? grp.x : BX), y: Math.round(grp ? grp.y : BY), width: Math.round(BLOCK_W), height: Math.round(BLOCK_H) };
 }
 
 // ─── drawTimestampBlock (Light Educational Theme) ────────────────────────
@@ -4470,8 +4576,8 @@ async function handleCommand(cmd) {
         const evalCode = (cmd && cmd.code) || (cmd && cmd.params && cmd.params.code) || (params && params.code);
         if (!evalCode) return { success: false, error: "Код для выполнения не указан" };
         const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
-        const fn = new AsyncFunction("figma", "hexToRgb", "ensureFonts", "createShapeOnCanvas", "findAndZoom", "searchAllBlocks", "fixAllBackgroundLayers", "drawTimestampBlock", "drawESLQuizPhoto", "drawESLFlipCards", "drawESLVideoQuiz", "drawESLVocabularyTable", "drawESLFlashcards", "drawESLFillBlanks", "drawESLSpeakingCards", "drawESLFullLesson", "refreshTableOfContents", evalCode);
-        const res = await fn(figma, hexToRgb, ensureFonts, createShapeOnCanvas, findAndZoom, searchAllBlocks, fixAllBackgroundLayers, drawTimestampBlock, drawESLQuizPhoto, drawESLFlipCards, drawESLVideoQuiz, drawESLVocabularyTable, drawESLFlashcards, drawESLFillBlanks, drawESLSpeakingCards, drawESLFullLesson, refreshTableOfContents);
+        const fn = new AsyncFunction("figma", "hexToRgb", "ensureFonts", "createShapeOnCanvas", "findAndZoom", "searchAllBlocks", "fixAllBackgroundLayers", "drawTimestampBlock", "drawESLQuizPhoto", "drawESLFlipCards", "drawESLVideoQuiz", "drawESLVocabularyTable", "drawESLFlashcards", "drawESLFillBlanks", "drawESLSpeakingCards", "drawESLFullLesson", "refreshTableOfContents", "getCanvasBounds", "findSmartNonOverlappingPosition", "_eslGetOrigin", evalCode);
+        const res = await fn(figma, hexToRgb, ensureFonts, createShapeOnCanvas, findAndZoom, searchAllBlocks, fixAllBackgroundLayers, drawTimestampBlock, drawESLQuizPhoto, drawESLFlipCards, drawESLVideoQuiz, drawESLVocabularyTable, drawESLFlashcards, drawESLFillBlanks, drawESLSpeakingCards, drawESLFullLesson, refreshTableOfContents, getCanvasBounds, findSmartNonOverlappingPosition, _eslGetOrigin);
         try { fixAllBackgroundLayers(); } catch (_) { }
         return { success: true, result: res };
       }

@@ -1000,8 +1000,8 @@ async def process_command(
         )
         return {"ok": False, "message": f"Drawing failed: {e}"}
 
-    if not draw_result.get("ok"):
-        err = draw_result.get("error", "Unknown draw error")
+    if not draw_result.get("ok") or not draw_result.get("nodeId"):
+        err = draw_result.get("error") or draw_result.get("message") or "Плагин Figma не вернул ID созданного блока"
         agent_logger.emit_log(
             stage="error",
             icon="❌",
@@ -1010,8 +1010,59 @@ async def process_command(
         )
         return {
             "ok": False,
-            "message": err,
+            "message": f"Ошибка отрисовки на холсте: {err}",
+            "technical_error": err,
         }
+
+    node_id = draw_result.get("nodeId")
+    warnings = list(draw_result.get("warnings") or [])
+    if content.get("warnings"):
+        warnings.extend(content["warnings"])
+
+    # Strict Canvas Verification
+    v_info = {}
+    try:
+        verify_code = f"""
+        const node = figma.getNodeById("{node_id}");
+        if (!node) return {{ exists: false, error: "Узел {node_id} не найден на странице холста Figma" }};
+        const vp = figma.viewport ? figma.viewport.center : null;
+        let autoCorrected = false;
+        let nx = Math.round(node.x || 0);
+        let ny = Math.round(node.y || 0);
+        if (nx < -40000 || nx > 400000 || ny < -40000 || ny > 400000) {{
+            if (vp) {{
+                node.x = Math.round(vp.x - (node.width || 800) / 2);
+                node.y = Math.round(vp.y - (node.height || 600) / 2);
+                nx = Math.round(node.x);
+                ny = Math.round(node.y);
+                autoCorrected = true;
+            }}
+        }}
+        figma.currentPage.selection = [node];
+        return {{
+            exists: true,
+            id: node.id,
+            name: node.name,
+            visible: node.visible,
+            x: nx,
+            y: ny,
+            width: Math.round(node.width || 0),
+            height: Math.round(node.height || 0),
+            autoCorrected: autoCorrected
+        }};
+        """
+        verify_res = await bridge.send_command("eval", {"code": verify_code}, timeout=8.0)
+        if verify_res and verify_res.get("ok"):
+            v_info = verify_res.get("result") or {}
+            if not v_info.get("exists"):
+                err_msg = v_info.get("error") or f"Блок {node_id} не был найден на холсте Figma"
+                agent_logger.emit_log(stage="error", icon="❌", title="Ошибка верификации", message=err_msg)
+                return {"ok": False, "message": err_msg, "technical_error": err_msg}
+            if v_info.get("autoCorrected"):
+                warnings.append("Координаты блока были скорректированы в видимую область экрана.")
+                logger.warning(f"Node {node_id} auto-corrected to viewport center: ({v_info.get('x')}, {v_info.get('y')})")
+    except Exception as verify_err:
+        logger.warning(f"Post-draw verification check skipped: {verify_err}")
 
     title = content.get("title", tp)
     agent_logger.emit_log(
@@ -1023,8 +1074,10 @@ async def process_command(
     return {
         "ok": True,
         "message": f"✅ Блок «{title}» создан и добавлен в оглавление!",
-        "nodeId": draw_result.get("nodeId"),
+        "nodeId": node_id,
         "title": title,
         "block_type": bt,
         "level": lv,
+        "warnings": list(dict.fromkeys(warnings)),
+        "node_info": v_info,
     }
