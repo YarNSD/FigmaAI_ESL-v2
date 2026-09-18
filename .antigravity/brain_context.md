@@ -38,6 +38,7 @@ FigmaAI — система AI-помощников для преподавате
 - **server/agents/image_agent.py**: Двухуровневый поиск и генерация изображений (поиск на Pinterest `site:pinterest.com` / Wikimedia / Google Imagen / Pollinations).
 - **server/agents/vision_agent.py**: Мультимодальный агент анализа изображений: OCR учебников с доски и пакетный Vision-анализ пачек фото (до 15 шт) из Figma или Telegram для генерации заданий с оригинальными фото.
 - **server/services/updater.py**: Модуль автоматических обновлений по воздуху (OTA Updater): проверка релизов GitHub API (публичный репозиторий YarNSD/FigmaAI_ESL-v2), безопасный `git pull`, pip install и сохранение локальной Student CRM.
+- **server/services/backup_service.py**: Резервное копирование и восстановление базы учеников (`data/students/`) в ZIP с манифестом `BACKUP_MANIFEST.json`, защитой от Zip-Slip и форматированием подписи для Telegram.
 - **figma_plugin/**: Компактный пульт управления доской (310x160 px): вставка времени занятия, сканирование и скрытие оглавления, окно настроек LAN IP сервера и полное резервное копирование / восстановление доски.
 - **web_ui/**: Веб-интерфейс управления с модальным окном обновлений (Changelog Markdown) и бейджем версии.
 

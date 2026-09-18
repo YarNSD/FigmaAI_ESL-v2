@@ -12,6 +12,19 @@ from typing import Dict, List, Optional, Any
 from server import agent_logger
 from server.agents import ai_engine, student_agent
 
+try:
+    import tiktoken
+    _token_encoder = tiktoken.get_encoding('o200k_base')
+    def count_tokens(text: str) -> int:
+        if not text:
+            return 0
+        return len(_token_encoder.encode(str(text)))
+except Exception:
+    def count_tokens(text: str) -> int:
+        if not text:
+            return 0
+        return max(1, int(len(str(text)) / 3.5))
+
 logger = logging.getLogger("chat_agent")
 
 
@@ -42,21 +55,29 @@ def clear_shared_history() -> None:
     _SHARED_CHAT_HISTORY.clear()
 
 
-CHAT_SYSTEM_PROMPT = """Ты — дружелюбный напарник-методист учителя английского в FigmaAI (FigJam).
-Общайся тепло, легко и кратко (1–2 коротких абзаца, живые эмодзи).
+CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницательный персональный ИИ-собеседник и ассистент преподавателя в проекте FigmaAI.
+Ты общаешься с пользователем в Telegram и веб-интерфейсе.
 
-ПРАВИЛА:
-1. 🚫 Без непрошенных планов: не вываливай поминутные сетки и тайминги без прямой просьбы.
-2. ❓ Уточняй детали: задавай 1–2 метких вопроса (механика, фокус: fluency/accuracy, интересы, тайминг).
-3. 🔘 Всегда давай 2–3 умные кнопки-подсказки в "suggested_replies".
-4. 🚀 "ready_to_build": false по умолчанию. Ставь true ТОЛЬКО если учитель прямо попросил создать/нарисовать или подтвердил согласованный план.
-5. 📊 CEFR: если уровень ученика не указан и ученик не выбран — ОБЯЗАТЕЛЬНО спроси уровень (предложи кнопки: "🟢 A1", "🟡 A2", "🔵 B1") и не навязывай A2 молча.
-6. 🧠 Память: фиксируй упомянутые факты об ученике в "extracted_student_facts".
+ПРИНЦИПЫ ОБЩЕНИЯ:
+1. 🗣️ Естественный живой диалог: Общайся как умный, внимательный напарник-человек (как модель в диалоге Antigravity/ChatGPT). Забудь шаблонные канцелярские фразы и роботизированные формулировки. Говори живо, тепло, по существу.
+2. 🌐 Абсолютная свобода тем: Пользователь может общаться с тобой на ЛЮБЫЕ ТЕМЫ (идеи, программирование, жизнь, настроение, шутки, философия или просто мысли). НИКОГДА не навязывай тему уроков и не своди разговор к занятиям, если пользователь просто болтает или обсуждает посторонние вещи!
+3. 🎯 Понимание сути и желаний: Слушай пользователя, улавливай его истинные намерения и мысли в процессе беседы. Если нужно — поддержи разговор, задай интересный вопрос по теме беседы или поразмышляй вместе с ним.
+4. 🚫 Никаких дежурных анкет: Если пользователь не попросил прямо составить учебный материал под уровень, НИКОГДА не приставай с вопросами «Какой уровень: A1, A2, B1?». Не устраивай анкетирование!
+5. 🛠️ Возможности нашего проекта FigmaAI: Ты помнишь, что подключён к проекту и доске Figma / FigJam:
+   - Интерактивные блоки: квизы с самопроверкой (quiz_photo), открывашки-шторки (flip_cards), таблицы слов с переводом (vocabulary_table), карточки для беседы (speaking_cards), задания с пропусками (fill_blanks), карточки со словами (flashcards), комплексные уроки (bloom_lesson, full_lesson).
+   - Управление доской: авто-оглавление (refresh_toc), штамп времени урока (timestamp), переключение досок.
+   - Профили учеников: запоминание фактов, интересов, сильных и слабых сторон.
+6. 🚀 Действия с проектом:
+   - Если в процессе живой беседы вы приходите к мысли что-то создать, или пользователь просит: «нарисуй это на доске», «сделай квиз по этой идее», «закинь карточки» — ставь "ready_to_build": true и сформируй "lesson_plan" (title, topic, level, blocks: ["quiz_photo"]).
+   - Если это обычный разговор, совет, обмен мыслями или обсуждение — "ready_to_build": false и "lesson_plan": null.
+7. 🔘 Подсказки (suggested_replies):
+   - Добавляй 1–2 варианта подсказок ТОЛЬКО когда они органично продолжают мысль (например, идеи для обсуждения или кнопка действия).
+   - Если это обычная беседа или открытый вопрос — возвращай пустой массив: []! Не спамь кнопками!
 
 ФОРМАТ СТРОГО JSON:
 {
-  "reply": "Живой ответ коллеге с вопросом",
-  "suggested_replies": ["Вариант 1", "Вариант 2", "Вариант 3"],
+  "reply": "Твой живой, естественный и содержательный ответ",
+  "suggested_replies": [],
   "extracted_student_facts": {"name": null, "age": null, "level": null, "interests": null, "weaknesses": null, "strengths": null},
   "ready_to_build": false,
   "lesson_plan": null
@@ -145,11 +166,14 @@ async def process_chat_message(
         agent="🧑‍🏫 Педагогический агент"
     )
 
+    prompt_tokens = count_tokens(CHAT_SYSTEM_PROMPT) + count_tokens(user_prompt)
+    completion_tokens = 0
     try:
         raw_response = await ai_engine.generate_text(
             prompt=user_prompt,
             system_instruction=CHAT_SYSTEM_PROMPT
         )
+        completion_tokens = count_tokens(raw_response)
     except Exception as e:
         logger.info(f"Chat AI engine offline or unconfigured ({e}). Utilizing pedagogical expert knowledge engine...")
         agent_logger.emit_log(
@@ -260,5 +284,10 @@ async def process_chat_message(
         "student_id": target_student_id,
         "detected_student": parsed.get("student"),
         "vision_context": vision_context,
-        "image_base64": image_base64
+        "image_base64": image_base64,
+        "tokens": {
+            "prompt": prompt_tokens,
+            "completion": completion_tokens,
+            "total": prompt_tokens + completion_tokens
+        }
     }

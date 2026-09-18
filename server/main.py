@@ -240,6 +240,41 @@ async def api_save_config(update: ConfigUpdate):
     return {"ok": True, "message": "Настройки сохранены"}
 
 
+# ── Student Backup & Restore API ─────────────────────────────────────────────
+
+@app.get("/api/backup/download")
+async def api_backup_download():
+    from server.services import backup_service
+    archive_path, manifest = backup_service.create_backup_archive()
+    filename = manifest.get("archive_name", "students_backup.zip")
+    return FileResponse(archive_path, media_type="application/zip", filename=filename)
+
+
+@app.post("/api/backup/create")
+async def api_backup_create():
+    from server.services import backup_service
+    archive_path, manifest = backup_service.create_backup_archive()
+    return {"ok": True, "manifest": manifest, "path": archive_path}
+
+
+@app.post("/api/backup/restore")
+async def api_backup_restore(file: UploadFile = File(...)):
+    from server.services import backup_service
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    try:
+        content = await file.read()
+        temp_zip.write(content)
+        temp_zip.close()
+        res = backup_service.restore_from_archive(temp_zip.name)
+        return res
+    finally:
+        if os.path.exists(temp_zip.name):
+            try:
+                os.remove(temp_zip.name)
+            except Exception:
+                pass
+
+
 # ── Telegram Bot Management API ───────────────────────────────────────────────
 
 @app.get("/api/telegram/status")

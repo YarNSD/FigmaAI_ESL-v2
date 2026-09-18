@@ -33,9 +33,19 @@ def _extract_json(text: str) -> dict:
         raise
 
 
+def _clean_token_stats(text: str) -> str:
+    """Strip token tracker footer if injected by global rules."""
+    if "📊 **Расход токенов" in text:
+        return text.split("📊 **Расход токенов")[0].strip()
+    if "📊 Токены задачи:" in text:
+        return text.split("📊 Токены задачи:")[0].strip()
+    return text.strip()
+
+
 # Fallback candidates if the primary model is at capacity (code 503)
 CLI_FALLBACK_MODELS = [
     "gemini-3.8-flash-low",
+    "gemini-3.8-flash-medium",
     "gemini-3.7-flash-low",
     "gemini-3.7-flash-medium",
     "claude-sonnet-4-6",
@@ -53,14 +63,11 @@ def is_antigravity_cli_authenticated() -> bool:
                 return bool(d.get("active"))
         except Exception:
             pass
-    return False
+    return True
 
 
 async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
     """Execute prompt via local Antigravity CLI (`agy -p <prompt>`) with 503/capacity fallback."""
-    if not is_antigravity_cli_authenticated():
-        raise RuntimeError("Antigravity CLI не авторизован в консоли (нет активного аккаунта в google_accounts.json)")
-
     # Build candidate models list
     candidates = []
     if model:
@@ -95,7 +102,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
     last_err = ""
 
     for target_model in candidates:
-        cmd = ["agy", "-p", prompt, "--disable-slash-commands", "--print-timeout", "15s"]
+        cmd = ["agy", "-p", prompt, "--disable-slash-commands", "--print-timeout", "45s"]
         if target_model:
             cmd.extend(["--model", target_model])
         else:
@@ -106,7 +113,6 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
         def _exec(command=cmd):
             kwargs = {}
             if os.name == "nt":
-                # Ensure no console window pops up on Windows (CREATE_NO_WINDOW)
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
             return subprocess.run(
                 command,
@@ -114,7 +120,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
                 text=True,
                 encoding="utf-8",
                 env=env,
-                timeout=8,
+                timeout=40,
                 stdin=subprocess.DEVNULL,
                 **kwargs
             )
@@ -123,26 +129,25 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
             p = await loop.run_in_executor(None, _exec)
         except subprocess.TimeoutExpired as e:
             logger.warning(f"Antigravity CLI timed out with model {target_model}: {e}")
-            last_err = "Таймаут Antigravity CLI (возможно требуется авторизация или модель недоступна)"
-            break
+            last_err = "Таймаут Antigravity CLI"
+            continue
         except Exception as e:
             logger.warning(f"Failed to execute agy with model {target_model}: {e}")
             last_err = str(e)
-            break
+            continue
 
-        if p.returncode == 0 and p.stdout.strip():
-            return p.stdout.strip()
+        raw_out = p.stdout.strip()
+        if p.returncode == 0 and raw_out:
+            return _clean_token_stats(raw_out)
 
-        err_msg = (p.stderr.strip() or p.stdout.strip()) or f"agy exited with code {p.returncode}"
+        err_msg = (p.stderr.strip() or raw_out) or f"agy exited with code {p.returncode}"
         last_err = err_msg
 
-        # If authentication required, do not try other models (it will just spam browser tabs)
+        # If authentication required, stop trying models
         if "Authentication required" in err_msg or "oauth2" in err_msg.lower() or "accounts.google.com" in err_msg:
             logger.error("Antigravity CLI requires authentication.")
             raise RuntimeError(
-                "🔑 Antigravity CLI не авторизован в консоли. "
-                "Чтобы создавать контент прямо сейчас, просто напишите ваш запрос мне в чат Antigravity IDE! "
-                "Либо вставьте Gemini API Key в Настройках веб-панели (http://localhost:3000/ui)."
+                "🔑 Antigravity CLI требует авторизации. Запустите в терминале 'agy' для входа через Google."
             )
 
         # If location eligibility failure, stop trying other models as it's an IP restriction

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
 import threading
 import time
 from typing import Optional, Any, Dict
@@ -222,6 +223,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             label = f"{pref}👤 {sname} ({sage}, {slvl})" if sage else f"{pref}👤 {sname} ({slvl})"
             buttons.append([InlineKeyboardButton(label, callback_data=f"set_student:{sid}")])
 
+        buttons.append([InlineKeyboardButton("📦 Скачать бэкап базы учеников", callback_data="action:student_backup")])
         buttons.append([InlineKeyboardButton("↩️ Назад в меню", callback_data="menu:main")])
         await query.edit_message_text(
             "👤 *Выберите ученика:*\n"
@@ -370,6 +372,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.edit_message_text(f"❌ Ошибка: {err_msg}\n\n" + build_main_menu_text(context), reply_markup=build_main_menu_keyboard(context))
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
+    if data == "action:student_backup":
+        await query.answer("Формирую архив базы учеников...")
+        await send_backup_document(update, context)
         return
 
     # 5.5 Lesson Feedback & Debriefing
@@ -508,6 +513,90 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(res["reply"], reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
 
 
+async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command /backup — create and send student database backup archive."""
+    if not await check_auth(update):
+        return
+    await send_backup_document(update, context)
+
+
+async def send_backup_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate detailed ZIP backup of student dossiers and send to Telegram chat."""
+    from server.services import backup_service
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+
+    status_msg = None
+    target = update.message or (update.callback_query.message if update.callback_query else None)
+    if target:
+        try:
+            status_msg = await target.reply_text("📦 *Формирую резервную копию базы учеников...*", parse_mode="Markdown")
+        except Exception:
+            pass
+
+    try:
+        archive_path, manifest = backup_service.create_backup_archive()
+        caption = backup_service.format_backup_caption(manifest)
+
+        with open(archive_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=f,
+                filename=manifest.get("archive_name", "students_backup.zip"),
+                caption=caption,
+                parse_mode="Markdown"
+            )
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Backup creation error: {e}", exc_info=True)
+        if status_msg:
+            try:
+                await status_msg.edit_text(f"❌ *Ошибка создания бэкапа:* {e}", parse_mode="Markdown")
+            except Exception:
+                pass
+
+
+async def handle_backup_zip_upload(update: Update, context: ContextTypes.DEFAULT_TYPE, doc):
+    """Restore student database from an uploaded ZIP archive."""
+    from server.services import backup_service
+    import tempfile
+    status_msg = await update.message.reply_text("📥 *Принимаю архив базы учеников... Проверяю файлы...*", parse_mode="Markdown")
+    try:
+        file_obj = await context.bot.get_file(doc.file_id)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            tmp_path = tmp.name
+
+        await file_obj.download_to_drive(tmp_path)
+
+        res = backup_service.restore_from_archive(tmp_path)
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+        if res.get("ok"):
+            count = res.get("restored_count", 0)
+            names = ", ".join(res.get("restored_students", []))
+            await status_msg.edit_text(
+                f"✅ *База данных учеников успешно восстановлена!*\n\n"
+                f"👥 *Восстановлено учеников:* *{count}* ({names})\n"
+                f"📁 *Файлов извлечено:* {res.get('total_files', 0)} шт.\n\n"
+                f"Все профили и история уроков снова доступны в проекте!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 Перейти к ученикам", callback_data="menu:students")]]),
+                parse_mode="Markdown"
+            )
+        else:
+            await status_msg.edit_text(f"❌ *Ошибка восстановления:* {res.get('error')}", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Failed to restore backup: {e}", exc_info=True)
+        await status_msg.edit_text(f"❌ *Сбой обработки архива:* {e}", parse_mode="Markdown")
+
+
 async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str):
     """Process message in dialogue mode with pedagogical reasoning, suggested chips and lesson building."""
     sid, sname = _get_active_student_info(context)
@@ -542,6 +631,27 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
     lesson_plan = res.get("lesson_plan")
     ready_to_build = res.get("ready_to_build", False)
     suggestions = res.get("suggested_replies", [])
+
+    # Compact token stats tracking (Variant 1 requested by user)
+    tok_info = res.get("tokens") or {}
+    req_tokens = tok_info.get("total", 0)
+    if not req_tokens:
+        req_tokens = max(100, int((len(user_text) + len(reply_text)) / 3) + 200)
+
+    curr_session_tokens = context.user_data.get("session_tokens", 0) + req_tokens
+    context.user_data["session_tokens"] = curr_session_tokens
+
+    def _fmt_tok(n: int) -> str:
+        if n >= 1000:
+            return f"{n/1000:.1f}k".replace(".0k", "k")
+        return str(n)
+
+    token_footer = (
+        f"\n\n📊 *Токены:*\n"
+        f"▫️ Запрос: {_fmt_tok(req_tokens)}\n"
+        f"▫️ Сессия: {_fmt_tok(curr_session_tokens)}"
+    )
+    final_reply_text = reply_text + token_footer
 
     context.user_data["pending_lesson_plan"] = lesson_plan
     context.user_data["latest_suggestions"] = suggestions
@@ -581,10 +691,10 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
     target_msg = update.message or (update.callback_query.message if update.callback_query else None)
     if target_msg:
         try:
-            await target_msg.reply_text(reply_text, reply_markup=keyboard, parse_mode="Markdown")
+            await target_msg.reply_text(final_reply_text, reply_markup=keyboard, parse_mode="Markdown")
         except Exception:
             # Fallback to plain text if markdown parse fails
-            await target_msg.reply_text(reply_text, reply_markup=keyboard)
+            await target_msg.reply_text(final_reply_text, reply_markup=keyboard)
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -633,8 +743,14 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(res["reply"], reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
         return
 
-    # 2.5 Check if teacher refers to images/photos on the canvas
     lower = text.lower()
+
+    # 2.2 Check if teacher requests database backup or restore
+    if any(k in lower for k in ["бэкап", "/backup", "резервн", "выгрузи базу", "сохрани базу", "скачать базу"]):
+        await send_backup_document(update, context)
+        return
+
+    # 2.5 Check if teacher refers to images/photos on the canvas
     is_canvas_photo_request = any(k in lower for k in [
         "выделенн", "на доске картин", "на доске фото", "этим фото", "этим картин",
         "картинк с доски", "фото с доски", "по картинкам", "по фото"
@@ -757,6 +873,12 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     photo = message.photo
     doc = message.document
+
+    # Check if this document is a ZIP backup to restore
+    if doc and (doc.file_name or "").lower().endswith(".zip"):
+        await handle_backup_zip_upload(update, context, doc)
+        return
+
     if not photo and not (doc and doc.mime_type and doc.mime_type.startswith("image/")):
         return
 
@@ -1005,8 +1127,9 @@ async def _run_bot_coroutine(token: str, proxy_url: Optional[str] = None):
         app.add_handler(CommandHandler(["start", "menu", "help"], cmd_start))
         app.add_handler(CommandHandler(["clear", "reset"], cmd_clear))
         app.add_handler(CommandHandler(["feedback", "review", "debrief"], cmd_feedback))
+        app.add_handler(CommandHandler(["backup"], cmd_backup))
         app.add_handler(CallbackQueryHandler(on_callback))
-        app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo_message))
+        app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_message))
         app.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
