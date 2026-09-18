@@ -12,6 +12,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import threading
 import time
 from typing import Optional, Any, Dict
@@ -42,6 +43,7 @@ _bot_thread: Optional[threading.Thread] = None
 _bot_loop: Optional[asyncio.AbstractEventLoop] = None
 _bot_status: str = "stopped"
 _bot_last_error: str = ""
+_active_creation_description: Optional[str] = None
 
 
 # ── Security & Auth ──────────────────────────────────────────────────────────
@@ -656,6 +658,41 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
     context.user_data["pending_lesson_plan"] = lesson_plan
     context.user_data["latest_suggestions"] = suggestions
 
+    # If ready_to_build and the user explicitly ordered creation in words, start building immediately!
+    if ready_to_build and lesson_plan and is_direct_create_command(user_text):
+        topic = lesson_plan.get("topic", "Урок")
+        plan_title = lesson_plan.get("title", f"Задание: {topic}")
+        plan_level = lesson_plan.get("level")
+        blocks = lesson_plan.get("blocks") or []
+        b_type = "bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo")
+        student_id = lesson_plan.get("student_id") or context.user_data.get("selected_student_id")
+        if student_id and not context.user_data.get("selected_student_id"):
+            context.user_data["selected_student_id"] = student_id
+        comments = lesson_plan.get("teacher_comments", "")
+        cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
+        context.user_data.pop("pending_lesson_plan", None)
+
+        target_msg = update.message or (update.callback_query.message if update.callback_query else None)
+        if target_msg:
+            try:
+                await target_msg.reply_text(
+                    f"{reply_text}\n\n🚀 *План готов! Начинаю генерацию и вёрстку на доске...*" + token_footer,
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                await target_msg.reply_text(f"{reply_text}\n\n🚀 План готов! Начинаю генерацию и вёрстку на доске...")
+
+        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
+        return
+
+    # If it was an exploratory discussion, tell the teacher clearly that they can just say "Делай"
+    if ready_to_build and lesson_plan:
+        final_reply_text = (
+            reply_text +
+            "\n\n👉 *Напишите «Делай»* (или нажмите кнопку ниже), чтобы я нарисовал этот блок на доске!" +
+            token_footer
+        )
+
     buttons = []
 
     # 1. Action button if ready to build
@@ -678,7 +715,6 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
         cleaned_suggestions.append(sugg)
 
     for idx, sugg in enumerate(cleaned_suggestions[:3]):
-        import re
         label = sugg if re.match(r'^[^\w\s]', sugg) else f"💡 {sugg}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"chat_suggest:{idx}")])
 
@@ -697,8 +733,76 @@ async def process_chat_interaction(update: Update, context: ContextTypes.DEFAULT
             await target_msg.reply_text(final_reply_text, reply_markup=keyboard)
 
 
+# ── Natural Language Command & Confirmation Detection Helpers ─────────────────
+
+CONFIRMATION_EXACT_WORDS = {
+    "делай", "давай", "создавай", "рисуй", "погнали", "ок", "ok", "да", "yes", "го", "go",
+    "начинай", "вперед", "вперёд", "стартуй", "закидывай", "закинь", "готов", "согласен",
+    "подходит", "отлично", "супер", "хорошо", "действуй", "генерируй", "запускай",
+    "сделай", "нарисуй", "создай", "do it", "let's go", "lets go", "ага", "плюс", "+",
+    "делай квиз", "рисуй на доске", "нарисуй это", "сделай это", "делай урок", "давай делай",
+    "да делай", "да давай", "давай рисуй", "делай давай", "конечно", "делай!", "давай!",
+    "да, делай", "да, давай", "да, рисуй", "ок делай", "ок давай", "поехали"
+}
+
+
+def is_confirmation_phrase(text: str) -> bool:
+    """Check if teacher's message confirms drawing/building the pending lesson plan."""
+    cleaned = re.sub(r"[!.,?]+", "", text.strip().lower()).strip()
+    if cleaned in CONFIRMATION_EXACT_WORDS:
+        return True
+
+    tokens = [
+        "делай", "давай", "рисуй", "создавай", "погнали", "закидывай", "стартуй",
+        "начинай", "действуй", "запускай", "поехали"
+    ]
+    words = cleaned.split()
+    if words and (words[0] in tokens or (words[0] in ("да", "ок", "ok", "хорошо") and len(words) > 1 and words[1] in tokens)):
+        return True
+    return False
+
+
+def is_direct_create_command(text: str) -> bool:
+    """Check if teacher explicitly commands to create/draw a specific ESL block using natural language."""
+    lower = text.lower().strip()
+    create_prefixes = (
+        "/draw_now", "/create_now",
+        "нарисуй на доске", "нарисуй", "нарисовать",
+        "создай на доске", "создай", "создать",
+        "сделай на доске", "сделай", "сделать",
+        "сгенерируй на доске", "сгенерируй", "сгенерировать",
+        "закинь на доске", "закинь на доску", "закинь",
+        "построй на доске", "построй",
+        "накидай быстренько", "накидай", "накидать",
+        "накидал быстренько", "накидал", "накидали",
+        "собери урок", "собери занятие", "собери"
+    )
+    starts_with_prefix = any(lower.startswith(p) for p in create_prefixes)
+    if not starts_with_prefix:
+        return False
+
+    block_markers = (
+        "квиз", "quiz", "тест", "открываш", "peekaboo", "flip", "карточк", "флешкарт",
+        "flashcard", "словар", "vocab", "слов", "пропуск", "fill", "разминк", "warmup",
+        "speaking", "говор", "урок", "заняти", "lesson", "блум", "bloom", "вопрос", "задани"
+    )
+    return any(marker in lower for marker in block_markers)
+
+
+def is_status_query(text: str) -> bool:
+    """Check if teacher is asking about current creation status or progress."""
+    lower = text.lower().strip()
+    status_patterns = [
+        "ты точно делаешь", "ты делаешь", "делаешь ли", "на каком этапе", "на каком ты этапе",
+        "когда сделаешь", "когда закончишь", "сообщи о том,что закончил", "сообщи когда закончил",
+        "долго еще", "долго ещё", "статус генерации", "статус задания", "делается ли",
+        "ты начал", "процесс идет", "процесс идёт", "уже готово", "готово ли"
+    ]
+    return any(p in lower for p in status_patterns)
+
+
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming teacher text messages."""
+    """Handle incoming teacher text messages with full natural language understanding."""
     if not await check_auth(update):
         return
 
@@ -738,6 +842,58 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # 2.2 Check if teacher requests database backup or restore
     if any(k in lower for k in ["бэкап", "/backup", "резервн", "выгрузи базу", "сохрани базу", "скачать базу"]):
         await send_backup_document(update, context)
+        return
+
+    # 2.3 Status query check (truthful answer, never hallucinate!)
+    if is_status_query(text):
+        if _active_creation_description:
+            await update.message.reply_text(
+                f"⏳ *Да, сейчас в процессе!*\n\n"
+                f"🎯 *Задача:* `{_active_creation_description}`\n"
+                f"🎨 ИИ генерирует контент и иллюстрации, а плагин верстает карточки на доске (обычно это занимает 20–40 сек).\n\n"
+                f"Как только блок появится на холсте, я сразу пришлю сюда уведомление!",
+                parse_mode="Markdown"
+            )
+            return
+        elif context.user_data.get("pending_lesson_plan"):
+            plan = context.user_data.get("pending_lesson_plan")
+            title = plan.get("title", plan.get("topic", "Урок"))
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"🚀 Нарисовать «{title[:20]}» на доске", callback_data="chat_action:draw_plan")]])
+            await update.message.reply_text(
+                f"ℹ️ *Сейчас генерация на паузе.*\n\n"
+                f"В памяти сохранён готовый план: *«{title}»*.\n\n"
+                f"👉 Просто напишите **«Делай»** в чат (или нажмите кнопку ниже) — и я сразу начну рисовать его на доске!",
+                reply_markup=kb,
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            await update.message.reply_text(
+                "ℹ️ *Сейчас на доске ничего не генерируется.*\n\n"
+                "Напишите словами, какое задание создать (например: *«сделай квиз про профессии для 8 лет»*), и я сразу приступлю!",
+                parse_mode="Markdown"
+            )
+            return
+
+    # 2.4 Check if teacher confirms pending lesson plan with natural speech ("делай", "давай", "рисуй", "ок", "погнали")
+    pending_plan = context.user_data.get("pending_lesson_plan")
+    if pending_plan and is_confirmation_phrase(text):
+        context.user_data.pop("pending_lesson_plan", None)
+        topic = pending_plan.get("topic", "Урок")
+        plan_title = pending_plan.get("title", f"Задание: {topic}")
+        plan_level = pending_plan.get("level")
+        blocks = pending_plan.get("blocks") or []
+        b_type = "bloom_lesson" if len(blocks) > 1 else (blocks[0] if blocks else "quiz_photo")
+        student_id = pending_plan.get("student_id") or context.user_data.get("selected_student_id")
+        if student_id and not context.user_data.get("selected_student_id"):
+            context.user_data["selected_student_id"] = student_id
+        comments = pending_plan.get("teacher_comments", "")
+        cmd_text = f"{plan_title}" + (f" ({comments})" if comments else "")
+        clean_text = text.strip().lower()
+        if len(text.strip()) > 15 and clean_text not in ("делай", "давай", "рисуй", "создавай", "погнали"):
+            cmd_text += f". Пожелания: {text.strip()}"
+
+        await execute_creation(update, context, command=cmd_text, block_type=b_type, topic=topic, level=plan_level)
         return
 
     # 2.5 Check if teacher refers to images/photos on the canvas
@@ -786,9 +942,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await execute_creation(update, context, command=text, block_type=pending_btype)
         return
 
-    # Check for direct draw commands
-    direct_draw_prefixes = ("/draw_now", "/create_now")
-    if any(lower.startswith(p) for p in direct_draw_prefixes):
+    # Check for direct draw commands in words (e.g. "нарисуй квиз...", "сделай квиз...", "/draw_now ...")
+    if is_direct_create_command(text):
         await execute_creation(update, context, command=text)
         return
 
@@ -942,6 +1097,9 @@ async def execute_creation(
     elif update.message:
         status_msg = await update.message.reply_text(status_text, parse_mode="Markdown")
 
+    global _active_creation_description
+    _active_creation_description = f"{topic or command[:35] or block_type or 'Учебное задание'} ({bname})"
+
     try:
         staged_photos = context.user_data.get("staged_photos")
         result = await orchestrator.process_command(
@@ -988,6 +1146,9 @@ async def execute_creation(
                 await status_msg.edit_text(f"❌ Ошибка:\n{e}")
             except Exception:
                 pass
+    finally:
+        _active_creation_description = None
+        context.user_data.pop("pending_lesson_plan", None)
 
 
 # ── Lifecycle Control ────────────────────────────────────────────────────────
