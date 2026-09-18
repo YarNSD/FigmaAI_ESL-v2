@@ -61,21 +61,19 @@ def set_value(path: str, value) -> None:
 
 
 def ai_engine() -> str:
-    return get("ai.engine", "antigravity")
+    return "antigravity"
 
 
 def gemini_api_key() -> str:
-    return get("ai.gemini_api_key", "") or os.environ.get("GEMINI_API_KEY", "")
+    return ""
 
 
 def gemini_model() -> str:
-    return get("ai.model", "gemini-3.7-flash-medium")
+    return get("ai.model", "gemini-3.8-flash-medium")
 
 
 def is_ai_ready() -> bool:
-    if ai_engine() == "antigravity":
-        return True
-    return bool(gemini_api_key())
+    return True
 
 
 

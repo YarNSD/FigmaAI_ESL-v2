@@ -69,13 +69,7 @@ async def lifespan(app_instance: FastAPI):
     logger.info(f"  🌐 Web panel:   http://localhost:{config.get('server.port', 3000)}/ui")
     logger.info(f"  🔌 Plugin port: http://localhost:{config.get('server.bridge_port', 45678)}")
     logger.info("=" * 60)
-    engine = config.ai_engine()
-    if engine == "antigravity":
-        logger.info(f"⚡ AI Engine: Antigravity CLI (Local Agent) — Model: {config.gemini_model()}")
-    elif config.gemini_api_key():
-        logger.info(f"✅ Gemini API Key ready (model: {config.gemini_model()})")
-    else:
-        logger.warning("⚠️  AI Engine not configured! Set it at http://localhost:3000/ui")
+    logger.info(f"⚡ AI Engine: Antigravity CLI (100% Local On-Device) — Model: {config.gemini_model()}")
 
     # Start Telegram bot if enabled
     if config.get("telegram.enabled") and config.get("telegram.bot_token"):
@@ -197,8 +191,6 @@ async def api_system_apply_update():
 async def api_get_config():
     cfg = config._config.copy()
     # Mask sensitive values
-    if cfg.get("ai", {}).get("gemini_api_key"):
-        cfg["ai"]["gemini_api_key"] = "***" + cfg["ai"]["gemini_api_key"][-4:]
     if cfg.get("telegram", {}).get("bot_token"):
         cfg["telegram"]["bot_token"] = "***" + cfg["telegram"]["bot_token"][-6:]
     return cfg
@@ -206,7 +198,6 @@ async def api_get_config():
 
 class ConfigUpdate(BaseModel):
     engine: Optional[str] = None
-    gemini_api_key: Optional[str] = None
     model: Optional[str] = None
     telegram_enabled: Optional[bool] = None
     telegram_bot_token: Optional[str] = None
@@ -220,8 +211,6 @@ class ConfigUpdate(BaseModel):
 async def api_save_config(update: ConfigUpdate):
     if update.engine:
         config.set_value("ai.engine", update.engine)
-    if update.gemini_api_key and not update.gemini_api_key.startswith("***"):
-        config.set_value("ai.gemini_api_key", update.gemini_api_key)
     if update.model:
         config.set_value("ai.model", update.model)
     if update.telegram_enabled is not None:

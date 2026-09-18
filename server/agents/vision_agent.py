@@ -131,58 +131,26 @@ async def analyze_image(image_base64: str, command: str = "", level: str = "A2")
         level=level or "A2"
     )
 
-    # First attempt: if user has Gemini API key, use direct multimodal call with PIL Image
-    vision_result = None
-    if config.gemini_api_key():
-        try:
-            import google.generativeai as genai
-            from PIL import Image
-            import io
-
-            genai.configure(api_key=config.gemini_api_key())
-            pil_img = Image.open(io.BytesIO(raw_bytes))
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            loop = ai_engine.asyncio.get_event_loop()
-
-            def _call_gemini():
-                res = model.generate_content([
-                    pil_img,
-                    f"You are an expert ESL teacher. The teacher asked: '{command}'. Level: {level}.\n"
-                    "Analyze this image and return valid JSON adhering to:\n"
-                    '{"topic": "...", "scene_description": "...", "objects_found": [...], '
-                    '"recommended_block_type": "quiz_photo", "pedagogical_plan": "...", '
-                    '"vocabulary": [{"word": "...", "transcription": "...", "translation": "...", "context": "..."}], '
-                    '"questions": [{"question": "...", "options": ["A", "B", "C"], "correct": "A", "explanation": "..."}]}'
-                ])
-                return res.text.strip()
-
-            raw_text = await loop.run_in_executor(None, _call_gemini)
-            vision_result = ai_engine._extract_json(raw_text)
-            logger.info("Vision Agent: successfully analyzed via Gemini API")
-        except Exception as e:
-            logger.warning(f"Gemini API vision failed ({e}), falling back to Antigravity CLI...")
-
-    # Second attempt: Antigravity CLI with file viewing inspection
-    if not vision_result:
-        try:
-            logger.info(f"Vision Agent: analyzing image via Antigravity CLI on {norm_path}...")
-            vision_result = await ai_engine.generate_json(
-                prompt,
-                system_instruction=(
-                    "You are an expert ESL Vision Agent. You have access to local file viewing tools. "
-                    "View and inspect the provided image file carefully, analyze its contents, and return valid JSON."
-                )
+    # Local execution via Antigravity CLI with file viewing inspection
+    try:
+        logger.info(f"Vision Agent: analyzing image via Antigravity CLI on {norm_path}...")
+        vision_result = await ai_engine.generate_json(
+            prompt,
+            system_instruction=(
+                "You are an expert ESL Vision Agent. You have access to local file viewing tools. "
+                "View and inspect the provided image file carefully, analyze its contents, and return valid JSON."
             )
-        except Exception as e:
-            logger.error(f"Vision Agent CLI analysis failed: {e}")
-            return {
-                "topic": "Visual Game",
-                "scene_description": "Картинка с холста",
-                "objects_found": [],
-                "recommended_block_type": "quiz_photo",
-                "image_base64": image_base64,
-                "image_path": norm_path,
-            }
+        )
+    except Exception as e:
+        logger.error(f"Vision Agent CLI analysis failed: {e}")
+        return {
+            "topic": "Visual Game",
+            "scene_description": "Картинка с холста",
+            "objects_found": [],
+            "recommended_block_type": "quiz_photo",
+            "image_base64": image_base64,
+            "image_path": norm_path,
+        }
 
     # Extract insights
     desc = vision_result.get("scene_description", "")
@@ -315,48 +283,16 @@ Output ONLY valid JSON adhering to:
 
     result = None
 
-    # 1. Direct Multimodal Gemini API call with PIL images
-    if config.gemini_api_key():
-        try:
-            import google.generativeai as genai
-            from PIL import Image
-            import io
-
-            genai.configure(api_key=config.gemini_api_key())
-            model_name = config.gemini_model() or "gemini-2.0-flash"
-            if "flash" not in model_name:
-                model_name = "gemini-2.0-flash"
-            model = genai.GenerativeModel(model_name)
-            loop = ai_engine.asyncio.get_event_loop()
-
-            contents = []
-            for f_info in saved_files:
-                pil_img = Image.open(io.BytesIO(f_info["bytes"]))
-                contents.append(f"--- Image {f_info['index']} (File: {f_info['name']}) ---")
-                contents.append(pil_img)
-            contents.append(prompt_instructions)
-
-            def _call_gemini():
-                res = model.generate_content(contents)
-                return res.text.strip()
-
-            raw_text = await loop.run_in_executor(None, _call_gemini)
-            result = ai_engine._extract_json(raw_text)
-            logger.info(f"Vision Agent: successfully analyzed {len(saved_files)} images via Gemini API")
-        except Exception as e:
-            logger.warning(f"Gemini API batch vision failed ({e}), falling back to Antigravity CLI...")
-
-    # 2. Antigravity CLI fallback
-    if not result:
-        try:
-            file_paths_str = "\n".join([f"- Image {f['index']}: {f['path']} (Name: {f['name']})" for f in saved_files])
-            cli_prompt = f"Available images on disk:\n{file_paths_str}\n\n{prompt_instructions}"
-            result = await ai_engine.generate_json(
-                cli_prompt,
-                system_instruction="You are an expert ESL Vision Agent. Inspect the provided image files and generate structured JSON."
-            )
-        except Exception as cli_err:
-            logger.error(f"Antigravity CLI batch vision failed: {cli_err}")
+    # Local Antigravity CLI execution
+    try:
+        file_paths_str = "\n".join([f"- Image {f['index']}: {f['path']} (Name: {f['name']})" for f in saved_files])
+        cli_prompt = f"Available images on disk:\n{file_paths_str}\n\n{prompt_instructions}"
+        result = await ai_engine.generate_json(
+            cli_prompt,
+            system_instruction="You are an expert ESL Vision Agent. Inspect the provided image files and generate structured JSON."
+        )
+    except Exception as cli_err:
+        logger.error(f"Antigravity CLI batch vision failed: {cli_err}")
 
     # 3. Fallback generator if LLM is unavailable
     if not result or not isinstance(result, dict):

@@ -1,8 +1,7 @@
 """
-ESL Figma AI — Unified AI Engine
-Supports:
-1. Google Antigravity CLI (`agy`) — local on-device agent execution (default, no API key required).
-2. Google Gemini API (`google.generativeai`) — fallback via user API key.
+ESL Figma AI — Local On-Device AI Engine
+100% Local execution via Google Antigravity CLI (`agy`) and local expert engines.
+Zero external API keys and zero cloud calls.
 """
 import asyncio
 import json
@@ -141,8 +140,7 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
             logger.error(f"Antigravity CLI location error: {err_msg}")
             raise RuntimeError(
                 "📍 Ошибка геолокации Antigravity CLI: текущий IP-адрес не поддерживается сервисом. "
-                "Включите в вашем VPN (Throne / Hiddify / V2Ray) узел США (USA) или Великобританию (UK), "
-                "либо вставьте Gemini API Key в Настройках веб-панели."
+                "Включите в вашем VPN узел США (USA) или Великобританию (UK)."
             )
 
         # If 503 / capacity issue, try next model
@@ -157,69 +155,11 @@ async def _run_antigravity_cli(prompt: str, model: str | None = None) -> str:
     raise RuntimeError(f"Antigravity CLI error: {last_err}")
 
 
-
-async def _run_gemini_api(prompt: str, system_instruction: str = "") -> str:
-    """Execute prompt via Google Generative AI API with automatic model mapping."""
-    import google.generativeai as genai
-    api_key = config.gemini_api_key()
-    if not api_key:
-        raise ValueError("Gemini API key not configured")
-
-    # Set up proxy if configured
-    proxy = config.get("telegram.proxy", {})
-    if proxy.get("enabled"):
-        host = proxy.get("host", "127.0.0.1")
-        port = proxy.get("port", 2080)
-        proto = proxy.get("protocol", "socks5")
-        proxy_str = f"{proto}://{host}:{port}"
-        os.environ["HTTP_PROXY"] = proxy_str
-        os.environ["HTTPS_PROXY"] = proxy_str
-        os.environ["ALL_PROXY"] = proxy_str
-
-    genai.configure(api_key=api_key)
-    kwargs = {}
-    if system_instruction:
-        kwargs["system_instruction"] = system_instruction
-
-    # Map CLI model names to valid Google AI Studio public models
-    raw_model = config.gemini_model() or "gemini-2.0-flash"
-    if any(k in raw_model for k in ["3.8", "3.7", "3.6", "3.1", "claude", "oss"]):
-        mapped_model = "gemini-2.0-flash"
-    else:
-        mapped_model = raw_model
-
-    loop = asyncio.get_event_loop()
-    try:
-        model = genai.GenerativeModel(mapped_model, **kwargs)
-        resp = await loop.run_in_executor(None, lambda: model.generate_content(prompt))
-        return resp.text.strip()
-    except Exception as e:
-        err_str = str(e)
-        if "503" in err_str or "UNAVAILABLE" in err_str or "ResourceExhausted" in err_str:
-            logger.warning(f"Model {mapped_model} at capacity, falling back to gemini-1.5-flash...")
-            fallback_model = genai.GenerativeModel("gemini-1.5-flash", **kwargs)
-            resp = await loop.run_in_executor(None, lambda: fallback_model.generate_content(prompt))
-            return resp.text.strip()
-        raise
-
-
 async def generate_text(prompt: str, system_instruction: str = "") -> str:
-    """Generate text using active AI engine with fallback support."""
-    engine = config.ai_engine()
+    """Generate text strictly using local Antigravity CLI (100% on-device)."""
     model = config.gemini_model()
-
-    if engine == "antigravity":
-        full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
-        try:
-            return await _run_antigravity_cli(full_prompt, model=model)
-        except Exception as e:
-            # If Antigravity fails due to location or capacity, check if user provided a Gemini API Key as backup
-            if config.gemini_api_key():
-                logger.warning(f"Antigravity CLI failed ({e}). Auto-falling back to Gemini API key...")
-                return await _run_gemini_api(prompt, system_instruction=system_instruction)
-            raise
-    else:
-        return await _run_gemini_api(prompt, system_instruction=system_instruction)
+    full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
+    return await _run_antigravity_cli(full_prompt, model=model)
 
 
 async def generate_json(prompt: str, system_instruction: str = "") -> dict:

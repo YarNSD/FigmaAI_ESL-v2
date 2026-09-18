@@ -708,16 +708,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     uid = str(update.effective_user.id) if update.effective_user else "default"
 
-    # 0. Check if user is entering a Gemini API Key (e.g. AIzaSy...)
-    if text.startswith("AIzaSy") and len(text) > 30:
-        config.set_value("ai.gemini_api_key", text)
-        await update.message.reply_text(
-            "✅ *Ключ Gemini API успешно сохранен!*\n\n"
-            "Теперь голосовые сообщения и распознавание аудио активны в полной мере.",
-            parse_mode="Markdown"
-        )
-        return
-
     # 1. Check if user is in an active feedback interview session
     feedback_session = feedback_agent.get_feedback_session(uid)
     if feedback_session:
@@ -815,51 +805,13 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     uid = str(update.effective_user.id) if update.effective_user else "default"
     await update.effective_chat.send_action("record_voice")
-
     status_msg = await update.message.reply_text("🎧 *Слушаю голосовое сообщение...*", parse_mode="Markdown")
 
-    try:
-        voice_file = await context.bot.get_file(update.message.voice.file_id)
-        voice_bytes = await voice_file.download_as_bytearray()
-
-        try:
-            transcribed_text = await feedback_agent.transcribe_and_analyze_voice(bytes(voice_bytes))
-        except ValueError as ve:
-            await status_msg.edit_text(
-                f"⚠️ *Требуется ключ API для распознавания голоса:*\n\n{ve}\n\n"
-                f"Вы можете прислать ключ прямо сюда (начинается на `AIzaSy...`) или ввести в Настройках веб-панели.",
-                parse_mode="Markdown"
-            )
-            return
-        except Exception as e:
-            logger.error(f"Voice transcription error: {e}", exc_info=True)
-            await status_msg.edit_text(f"❌ Не удалось расшифровать голос: {e}\nПопробуйте написать текстом.")
-            return
-
-        await status_msg.edit_text(f"🎙️ *Вы сказали:* «{transcribed_text}»\n\n🧠 *Анализирую...*", parse_mode="Markdown")
-
-        # Check if user is in feedback session or voice starts one explicitly
-        session = feedback_agent.get_feedback_session(uid)
-        if not session and any(k in transcribed_text.lower() for k in ["фидбек", "итоги", "отзыв о занятии", "как прошел урок", "как прошло занятие", "итоги урока", "дебрифинг"]):
-            sid, _ = _get_active_student_info(context)
-            feedback_agent.start_feedback_session(uid, student_id=sid)
-            session = feedback_agent.get_feedback_session(uid)
-
-        if session:
-            res = await feedback_agent.process_feedback_step(uid, transcribed_text)
-            buttons = []
-            for idx, sugg in enumerate(res.get("suggested_replies", [])[:3]):
-                buttons.append([InlineKeyboardButton(sugg, callback_data=f"chat_suggest:{idx}")])
-            buttons.append([InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")])
-            context.user_data["latest_suggestions"] = res.get("suggested_replies", [])
-            await update.message.reply_text(res["reply"], reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
-        else:
-            # Process as normal conversational chat message
-            await process_chat_interaction(update, context, transcribed_text)
-
-    except Exception as e:
-        logger.error(f"Error handling voice message: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ Ошибка обработки голосового: {e}")
+    await status_msg.edit_text(
+        "ℹ️ *Голосовой ввод через облачные API отключён.*\n\n"
+        "Все модули системы работают строго **100% локально** на вашем компьютере без внешних API. Пожалуйста, напишите запрос текстом или выберите действие в меню!",
+        parse_mode="Markdown"
+    )
 
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):

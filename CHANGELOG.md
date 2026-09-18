@@ -5,6 +5,19 @@
 
 ---
 
+## [0.11.0-beta.4] — 2026-09-18 (Ветка `beta`)
+
+### 🛡️ Полный переход на 100% On-Device Local Engine (Zero Cloud Leak)
+- **Полное удаление внешних облачных API (`google.generativeai`)**:
+  - Из `server/agents/ai_engine.py`, `server/agents/vision_agent.py` и `server/agents/feedback_agent.py` полностью удалены вызовы внешних облачных Gemini API.
+  - Все генерации текстов, заданий и анализ выполняются строго локально на ПК через Google Antigravity CLI (`agy`) и автономную педагогическую базу знаний (`pedagogical_knowledge.py`).
+- **Полная ликвидация формы ввода API-ключа в Web UI**:
+  - Из настроек панели управления (`web_ui/index.html`, `web_ui/app.js`) полностью удалены поле ввода ключа `#apiKeyInput`, кнопка скрытия `#toggleKeyVisibility` и контейнер `#apiKeyGroup`.
+  - Зафиксирован постоянный статус: `✅ 100% On-Device: Все агенты работают строго локально на вашем компьютере. Никаких внешних API-ключей и облачных запросов!`.
+- **Очистка Telegram-бота и конфигураций**:
+  - В `server/telegram_bot.py` удален перехват API-ключей Google AI Studio (`AIzaSy...`), голосовой ввод защищен локальным уведомлением о приватности.
+  - Из `config.json`, `config.example.json`, `server/config.py` и `server/main.py` удалены параметры и валидаторы `gemini_api_key`.
+
 ## [0.11.0-beta.3] — 2026-09-18 (Ветка `beta`)
 
 ### 📦 Резервное копирование и восстановление базы учеников (Student CRM Backup & Restore)

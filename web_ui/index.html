@@ -478,31 +478,22 @@
           <h3>⚡ Движок ИИ (AI Engine)</h3>
           <div class="form-group">
             <label>Среда запуска агентов</label>
-            <select id="engineSelect" onchange="toggleEngineSettings()">
-              <option value="antigravity" selected>Google Antigravity CLI (Локальный агент на ПК, без API-ключей)</option>
-              <option value="gemini_api">Google Gemini API (через API-ключ)</option>
+            <select id="engineSelect" disabled style="opacity:0.85;cursor:default">
+              <option value="antigravity" selected>Google Antigravity CLI (100% Локально на ПК, без API-ключей)</option>
             </select>
             <small id="engineNotice" style="color:var(--accent-light);display:block;margin-top:6px">
-              ✅ Агенты работают локально через Antigravity CLI (agy) на вашем компьютере. API-ключи не требуются!
+              ✅ 100% On-Device: Все агенты работают строго локально на вашем компьютере. Никаких внешних API-ключей и облачных запросов!
             </small>
           </div>
           <div class="form-group">
             <label>Модель генерации</label>
             <select id="modelSelect">
               <option value="gemini-3.7-flash-medium">Gemini 3.7 Flash (Medium) — Стабильная и быстрая (Рекомендуется)</option>
-              <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash (Medium) — Экспериментальная (бывают 503)</option>
+              <option value="gemini-3.8-flash-medium">Gemini 3.8 Flash (Medium) — Экспериментальная</option>
               <option value="gemini-3.8-flash-high">Gemini 3.8 Flash (High) — Максимальное качество</option>
               <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Thinking) — Глубокое рассуждение</option>
               <option value="gpt-oss-120b-medium">GPT-OSS 120B (Medium)</option>
             </select>
-          </div>
-          <div class="form-group" id="apiKeyGroup" style="display:none">
-            <label>Gemini API Key (только для режима Google API)</label>
-            <div class="input-eye">
-              <input id="apiKeyInput" type="password" placeholder="AIzaSy...">
-              <button class="eye-btn" onclick="toggleVisibility('apiKeyInput')">👁</button>
-            </div>
-            <small>Получить: <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></small>
           </div>
         </div>
 

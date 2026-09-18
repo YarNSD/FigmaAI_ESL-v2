@@ -6,7 +6,6 @@
   },
   "ai": {
     "engine": "antigravity",
-    "gemini_api_key": "",
     "model": "gemini-3.8-flash-medium"
   },
   "figma": {

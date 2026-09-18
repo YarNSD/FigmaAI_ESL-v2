@@ -47,52 +47,12 @@ def clear_feedback_session(user_id: str) -> None:
 
 async def transcribe_and_analyze_voice(voice_bytes: bytes, context_prompt: str = "") -> str:
     """
-    Transcribe and analyze Telegram voice message (.ogg Opus) via Google Gemini Multimodal.
+    Voice transcription via cloud API is disabled for 100% local on-device operation.
     """
-    api_key = config.gemini_api_key()
-    if not api_key:
-        raise ValueError(
-            "Для голосовых сообщений требуется Gemini API Key. "
-            "Получите его бесплатно за 1 минуту на https://aistudio.google.com "
-            "и укажите в настройках панели или пришлите боту."
-        )
-
-    import google.generativeai as genai
-    genai.configure(api_key=api_key)
-
-    # Proxy setup if configured
-    proxy = config.get("telegram.proxy", {})
-    if proxy.get("enabled"):
-        host = proxy.get("host", "127.0.0.1")
-        port = proxy.get("port", 2080)
-        proto = proxy.get("protocol", "socks5")
-        proxy_str = f"{proto}://{host}:{port}"
-        os.environ["HTTP_PROXY"] = proxy_str
-        os.environ["HTTPS_PROXY"] = proxy_str
-        os.environ["ALL_PROXY"] = proxy_str
-
-    model_name = config.gemini_model() or "gemini-2.0-flash"
-    if any(k in model_name for k in ["3.8", "3.7", "3.6", "3.1", "claude"]):
-        model_name = "gemini-2.0-flash"
-
-    model = genai.GenerativeModel(model_name)
-    loop = ai_engine.asyncio.get_event_loop()
-
-    def _call():
-        audio_part = {
-            "mime_type": "audio/ogg",
-            "data": voice_bytes
-        }
-        instruction = (
-            "Ты — ассистент преподавателя английского. Точно расшифруй речь преподавателя на русском языке. "
-            "Если в контексте обсуждается фидбек по уроку английского языка, сохрани все педагогические термины, "
-            "номера блоков (1.1, 2.3 и т.д.), имена учеников и английские слова без искажений. "
-            "Выведи ТОЛЬКО чистый расшифрованный текст без лишних комментариев."
-        )
-        res = model.generate_content([audio_part, instruction])
-        return (res.text or "").strip()
-
-    return await loop.run_in_executor(None, _call)
+    raise ValueError(
+        "Голосовые запросы через внешние API отключены: система работает строго локально на вашем ПК без передачи данных в сторонние облака. "
+        "Пожалуйста, вводите сообщения текстом."
+    )
 
 
 async def process_feedback_step(user_id: str, text: str) -> Dict[str, Any]:

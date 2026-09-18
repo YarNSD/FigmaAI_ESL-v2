@@ -252,18 +252,10 @@ function hideClarify() {
 
 // ── Settings ─────────────────────────────────────────────────────────
 function toggleEngineSettings() {
-  const engine = document.getElementById('engineSelect')?.value;
-  const keyGroup = document.getElementById('apiKeyGroup');
   const notice = document.getElementById('engineNotice');
-  if (keyGroup) keyGroup.style.display = engine === 'gemini_api' ? 'block' : 'none';
   if (notice) {
-    if (engine === 'antigravity') {
-      notice.innerHTML = '✅ Агенты работают локально через Antigravity CLI (agy) на вашем компьютере. API-ключи не требуются!';
-      notice.style.color = 'var(--accent-light)';
-    } else {
-      notice.innerHTML = 'ℹ️ Запросы отправляются в Google AI Studio по указанному API-ключу.';
-      notice.style.color = 'var(--text-3)';
-    }
+    notice.innerHTML = '✅ 100% On-Device: Все агенты работают строго локально на вашем компьютере. Никаких внешних API-ключей и облачных запросов!';
+    notice.style.color = 'var(--accent-light)';
   }
 }
 
@@ -273,13 +265,11 @@ async function loadSettings() {
     const cfg = await r.json();
 
     const v = (id, val) => { const el = document.getElementById(id); if(el && val) el.value = val; };
-    const engine = cfg.ai?.engine || 'antigravity';
     const engineEl = document.getElementById('engineSelect');
-    if (engineEl) engineEl.value = engine;
+    if (engineEl) engineEl.value = 'antigravity';
     toggleEngineSettings();
 
     v('modelSelect', cfg.ai?.model);
-    v('apiKeyInput', cfg.ai?.gemini_api_key);
     v('tutoringUrl', cfg.figma?.boards?.tutoring?.url);
     v('radugaUrl', cfg.figma?.boards?.raduga?.url);
 
@@ -298,7 +288,7 @@ async function loadSettings() {
 
 async function saveSettings() {
   const payload = {
-    engine: document.getElementById('engineSelect')?.value || 'antigravity',
+    engine: 'antigravity',
     model: document.getElementById('modelSelect')?.value,
     tutoring_board_url: document.getElementById('tutoringUrl')?.value,
     raduga_board_url: document.getElementById('radugaUrl')?.value,
@@ -306,10 +296,6 @@ async function saveSettings() {
     telegram_proxy_host: document.getElementById('proxyHost')?.value,
     telegram_proxy_port: parseInt(document.getElementById('proxyPort')?.value) || 1080,
   };
-
-
-  const apiKey = document.getElementById('apiKeyInput')?.value?.trim();
-  if (apiKey && !apiKey.startsWith('***')) payload.gemini_api_key = apiKey;
 
   const tgToken = document.getElementById('tgToken')?.value?.trim();
   if (tgToken && !tgToken.startsWith('***')) payload.telegram_bot_token = tgToken;

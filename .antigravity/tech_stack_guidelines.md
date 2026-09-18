@@ -1,7 +1,7 @@
 # 🛠 FigmaAI: Tech Stack Guidelines & Bug Journal
 
 ## 1. Технические Стандарты и Стек
-- **ИИ Движок (AI Engine)**: **Google Antigravity CLI (`agy`)** — основной локальный движок. Запускает агентов прямо на ПК пользователя без внешних API-ключей с доступом к моделям Gemini 3.8 Flash, Claude Sonnet 4.6, GPT-OSS. Google Gemini API поддерживается как альтернативный fallback.
+- **ИИ Движок (AI Engine)**: **100% On-Device Local Engine**. Запуск агентов осуществляется строго локально на ПК пользователя через Google Antigravity CLI (`agy`) и встроенную педагогическую базу знаний (`pedagogical_knowledge.py`). Все внешние облачные API (`google.generativeai`) и формы ввода API-ключей полностью удалены из проекта для максимальной конфиденциальности и автономности.
 - **Целевая среда**: **FigJam** (основная) и Figma Design. Плагин поддерживает оба редактора через `"editorType": ["figma", "figjam"]` в `manifest.json`.
 - **Ссылки на доски**: FigJam использует URL вида `https://figma.com/board/{file_key}/...`. Сервер автоматически распознает тип `figjam`.
 - **Python**: 3.10+ (FastAPI, uvicorn, pydantic, websockets, subprocess/agy CLI, aiogram).
@@ -752,5 +752,11 @@
       3) Время ожидания `subprocess.run` для `agy` снижено с 40 до 25 секунд.
       4) Модель по умолчанию изменена с зависающей `gemini-3.8-flash-low` на стабильную `gemini-3.8-flash-medium`.
 
-
-
+76. **Полный переход на 100% On-Device Local Engine и удаление облачного API**:
+    - *Контекст и требование пользователя*:
+      Пользователь потребовал исключить любые обращения к облачным API и навсегда убрать форму ввода API-ключа из проекта. Все вычисления должны выполняться строго локально на компьютере.
+    - *Решение*:
+      1) **Полное удаление google.generativeai**: из модулей server/agents/ai_engine.py, server/agents/vision_agent.py, server/agents/feedback_agent.py полностью удалены вызовы _run_gemini_api и облачные зависимости.
+      2) **Ликвидация формы ввода API-ключа**: из Web UI (web_ui/index.html, web_ui/app.js) удалены контейнер #apiKeyGroup, поле #apiKeyInput и опция gemini_api. В интерфейсе закреплено уведомление о 100% локальной работе на ПК.
+      3) **Очистка Telegram-бота**: в server/telegram_bot.py удален перехват API-ключей Google AI Studio (AIzaSy...), а голосовой ввод переведен на локальное уведомление о приватности.
+      4) **Очистка конфигураций**: из config.json, config.example.json, server/config.py и server/main.py удалены параметры и валидаторы gemini_api_key. Движок зафиксирован как antigravity (Google Antigravity CLI + педагогическая база знаний).
