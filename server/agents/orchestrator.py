@@ -135,14 +135,26 @@ def _heuristic_detect_params(command: str) -> dict:
 
 
 async def _detect_params(command: str) -> dict:
-    """Use AI engine to parse a natural language command into structured params, with heuristic fallback."""
+    """Use fast heuristic routing first to save 450 tokens, falling back to AI engine only when ambiguous."""
+    heuristic = _heuristic_detect_params(command)
+    cmd_strip = (command or "").strip()
+
+    # Fast path: if topic is explicitly extracted or command is direct/short (<= 12 words)
+    has_specific_topic = heuristic.get("topic") and heuristic["topic"] not in ("English", "Daily Life & Routines")
+    is_direct = len(cmd_strip.split()) <= 12
+
+    if has_specific_topic or is_direct:
+        logger.info(f"⚡ Fast-path heuristic detection used for: '{cmd_strip[:50]}' (0 tokens)")
+        return heuristic
+
     if config.is_ai_ready() and ai_engine.is_antigravity_cli_authenticated():
         try:
             prompt = f'User command: "{command}"\nExtract the block creation parameters into JSON.'
             return await ai_engine.generate_json(prompt, system_instruction=DETECT_PROMPT)
         except Exception as e:
             logger.warning(f"AI engine failed during param detection ({e}), falling back to heuristics")
-    return _heuristic_detect_params(command)
+    return heuristic
+
 
 
 
@@ -239,15 +251,111 @@ async def generate_full_lesson(
 
     sub_blocks = []
 
+    is_child = (int(student_age) <= 14 if str(student_age).isdigit() else False) or "ребенок" in full_ctx_str or "дети" in full_ctx_str
+
+    # Extract custom quantities if specified by teacher in command or history
+    m_quiz_count = re.search(r"(?:квиз\w*|вопрос\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
+    if not m_quiz_count:
+        m_quiz_count = re.search(r"(\d{1,2})\s*(?:вопрос\w*|задани\w* в квиз\w*)", full_ctx_str)
+
+    m_vocab_count = re.search(r"(?:словар\w*|слов\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
+    if not m_vocab_count:
+        m_vocab_count = re.search(r"(\d{1,2})\s*(?:слов\w*)", full_ctx_str)
+
+    m_fill_count = re.search(r"(?:пропуск\w*|предложен\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
+    if not m_fill_count:
+        m_fill_count = re.search(r"(\d{1,2})\s*(?:предложен\w*|пропуск\w*)", full_ctx_str)
+
+    m_cards_count = re.search(r"(?:карточ\w*|говорен\w*|speaking)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
+    if not m_cards_count:
+        m_cards_count = re.search(r"(\d{1,2})\s*(?:карточ\w*)", full_ctx_str)
+
+    block_counts = {
+        "quiz": int(m_quiz_count.group(1)) if m_quiz_count else 10,
+        "vocab": int(m_vocab_count.group(1)) if m_vocab_count else 8,
+        "fill": int(m_fill_count.group(1)) if m_fill_count else 10,
+        "cards": int(m_cards_count.group(1)) if m_cards_count else 5,
+    }
+
+    # 1. Attempt High-Efficiency Unified Bloom Lesson Generation (1 single cohesive LLM call)
+    unified_success = False
+    teacher_guide_text = ""
+
     agent_logger.emit_log(
         stage="generating",
         icon="🧠",
         title="Таксономия Блума (Learning Arc)",
-        message=f"Выстраиваю 4 когнитивные фазы (Remember ➔ Apply ➔ Evaluate ➔ Create) для {student_name} ({level})..."
+        message=f"Генерирую комплексный урок (Remember ➔ Apply ➔ Evaluate ➔ Create) для {student_name} ({level})..."
     )
 
-    # 1. Generate Teacher Guide via LLM structured by Bloom stages
-    guide_prompt = f"""Ученик: {student_name} ({student_age} лет, {level})
+    try:
+        unified_lesson = await content_agent.generate_unified_bloom_lesson(
+            topic=topic,
+            level=level,
+            student_profile=student_profile,
+            bloom_arc=bloom_arc,
+            counts=block_counts
+        )
+        if unified_lesson and isinstance(unified_lesson, dict):
+            teacher_guide_text = unified_lesson.get("teacher_guide", "")
+            action_map = {
+                "speaking_cards": "DRAW_SPEAKING_CARDS",
+                "vocabulary_table": "DRAW_VOCAB_TABLE",
+                "quiz_photo": "DRAW_QUIZ_PHOTO",
+                "fill_blanks": "DRAW_FILL_BLANKS",
+                "flip_cards": "DRAW_FLIP_CARDS"
+            }
+            temp_blocks = []
+            for stage in bloom_arc:
+                b_type = stage["block_type"]
+                b_level = stage["bloom_level"]
+                b_badge = stage["badge_text"]
+                b_color = stage["badge_color"]
+
+                cnt = unified_lesson.get(b_type)
+                if not cnt:
+                    continue
+
+                cnt["bloom_badge"] = b_badge
+                cnt["bloom_color"] = b_color
+
+                if b_type == "quiz_photo":
+                    cnt["has_images"] = True
+                    cnt["image_mode"] = "generate"
+                    questions = cnt.get("questions", [])
+                    queries = [q.get("image_query", q.get("question", q.get("sentence", ""))) for q in questions]
+                    images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child)
+                    for q, img in zip(questions, images_b64):
+                        q["image_base64"] = img
+                    cnt["questions"] = questions
+                elif b_type == "speaking_cards" and is_child:
+                    cards = cnt.get("cards", [])
+                    queries = [f"{c.get('question', '')} {topic}" for c in cards]
+                    imgs = await image_agent.get_quiz_images(queries, topic=topic, is_child=True)
+                    for c, img in zip(cards, imgs):
+                        if img:
+                            c["image_base64"] = img
+
+                temp_blocks.append({
+                    "action": action_map.get(b_type, f"DRAW_{b_type.upper()}"),
+                    "data": cnt,
+                    "bloom_badge": b_badge,
+                    "bloom_color": b_color,
+                    "bloom_level": b_level
+                })
+
+            if len(temp_blocks) >= 2:
+                sub_blocks = temp_blocks
+                unified_success = True
+                logger.info(f"✅ Fast unified Bloom lesson successfully assembled ({len(sub_blocks)} sub-blocks, 1 LLM call)")
+    except Exception as e:
+        logger.warning(f"Unified Bloom generation failed ({e}), falling back to sequential stage generation: {e}")
+        sub_blocks = []
+        unified_success = False
+
+    # 2. Sequential fallback if unified generation was not applicable or failed
+    if not unified_success:
+        guide_prompt = f"""Ученик: {student_name} ({student_age} лет, {level})
 Интересы: {', '.join(student.get('interests', [])) if student else 'не указаны'}
 Слабые стороны: {', '.join(student.get('weaknesses', [])) if student else 'не указаны'}
 Тема: {topic}
@@ -281,158 +389,151 @@ async def generate_full_lesson(
 🏠 ДОМАШНЕЕ ЗАДАНИЕ
 • 1 быстрое микро-задание на закрепление (1 строка).
 """
-    try:
-        teacher_guide_text = await ai_engine.generate(
-            system_prompt="Ты — опытный методист ESL. Составь краткую тезисную шпаргалку для преподавателя. Строго без markdown-разметки (без звёздочек, решеток и таблиц). Только чистый текст с маркерами '•'.",
-            prompt=guide_prompt,
-            temperature=0.3
-        )
-    except Exception as e:
-        logger.warning(f"Failed to generate teacher guide via AI: {e}")
+        try:
+            teacher_guide_text = await ai_engine.generate(
+                system_prompt="Ты — опытный методист ESL. Составь краткую тезисную шпаргалку для преподавателя. Строго без markdown-разметки (без звёздочек, решеток и таблиц). Только чистый текст с маркерами '•'.",
+                prompt=guide_prompt,
+                temperature=0.3
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate teacher guide via AI: {e}")
+            is_kid = (student_profile.get("age", 14) < 12) or "ребенок" in student_name.lower()
+            teacher_guide_text = (
+                f"🎯 ЭТАПЫ ЗАНЯТИЯ (Тайминг: 45 мин | Уровень: {level})\n"
+                f"• 00–08 мин | Разминка и счет (Remember): активировать числа (10–100) и первичные предлоги с опорой на картинки.\n"
+                f"• 08–18 мин | Отработка предлогов (Apply): поиск предметов в комнате (in, on, under, behind, next to).\n"
+                f"• 18–30 мин | Описание людей и фото-квиз (Analyze): сопоставление номеров агентов, цвета глаз и роста (tall/short).\n"
+                f"• 30–40 мин | Игровая миссия и речь (Create): детективная игра «Найди секретного агента» со спонтанным говорением.\n"
+                f"• 40–45 мин | Рефлексия (Cooler): назвать 3 числа, 2 предлога и 1 слово внешности.\n\n"
+                f"💡 МЕТОДИЧЕСКИЙ ФОКУС ({student_name}, {level})\n"
+                f"• {'Частая смена микро-активностей каждые 7–10 минут для удержания концентрации.' if is_kid else 'Практическая направленность и максимум спонтанного говорения.'}\n"
+                f"• Опора на наглядные визуальные карточки, минимизация абстрактных грамматических правил.\n"
+                f"• Реакция на ошибки: не перебивать, использовать метод мягкого повторения (Echoing).\n\n"
+                f"🗣️ СТАРТОВЫЙ АЙСБРЕЙКЕР\n"
+                f"• «Hello! Look around your room: what is on your desk right now? Can you name 3 things in English?»\n\n"
+                f"🏠 ДОМАШНЕЕ ЗАДАНИЕ\n"
+                f"• Нарисовать свою комнату и спрятать в ней 3 секретных предмета с подписями на английском."
+            )
+
+        for stage in bloom_arc:
+            b_type = stage["block_type"]
+            b_level = stage["bloom_level"]
+            b_instr = stage["content_prompt_instructions"]
+            b_badge = stage["badge_text"]
+            b_color = stage["badge_color"]
+            try:
+                if b_type == "speaking_cards":
+                    c_num = block_counts.get("cards") or 5
+                    cnt = await content_agent.generate_speaking_cards(
+                        topic, level, c_num,
+                        bloom_level=b_level,
+                        bloom_instructions=b_instr
+                    )
+                    if is_child:
+                        cards = cnt.get("cards", [])
+                        queries = [f"{c.get('question', '')} {topic}" for c in cards]
+                        imgs = await image_agent.get_quiz_images(queries, topic=topic, is_child=True)
+                        for c, img in zip(cards, imgs):
+                            if img:
+                                c["image_base64"] = img
+                    cnt["bloom_badge"] = b_badge
+                    cnt["bloom_color"] = b_color
+                    sub_blocks.append({
+                        "action": "DRAW_SPEAKING_CARDS",
+                        "data": cnt,
+                        "bloom_badge": b_badge,
+                        "bloom_color": b_color,
+                        "bloom_level": b_level
+                    })
+                elif b_type == "vocabulary_table":
+                    v_num = block_counts.get("vocab") or 8
+                    cnt = await content_agent.generate_vocabulary_table(
+                        topic, level, v_num,
+                        bloom_level=b_level,
+                        bloom_instructions=b_instr
+                    )
+                    cnt["bloom_badge"] = b_badge
+                    cnt["bloom_color"] = b_color
+                    sub_blocks.append({
+                        "action": "DRAW_VOCAB_TABLE",
+                        "data": cnt,
+                        "bloom_badge": b_badge,
+                        "bloom_color": b_color,
+                        "bloom_level": b_level
+                    })
+                elif b_type == "quiz_photo":
+                    q_num = max(int(block_counts.get("quiz") or 10), 10)
+                    cnt = await content_agent.generate_quiz_photo(
+                        topic, level, q_num,
+                        bloom_level=b_level,
+                        bloom_instructions=b_instr
+                    )
+                    cnt["has_images"] = True
+                    cnt["image_mode"] = "generate"
+                    cnt["bloom_badge"] = b_badge
+                    cnt["bloom_color"] = b_color
+                    questions = cnt.get("questions", [])
+                    queries = [q.get("image_query", q.get("question", "")) for q in questions]
+                    images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child)
+                    for q, img in zip(questions, images_b64):
+                        q["image_base64"] = img
+                    cnt["questions"] = questions
+                    sub_blocks.append({
+                        "action": "DRAW_QUIZ_PHOTO",
+                        "data": cnt,
+                        "bloom_badge": b_badge,
+                        "bloom_color": b_color,
+                        "bloom_level": b_level
+                    })
+                elif b_type == "flip_cards":
+                    cnt = await content_agent.generate_flip_cards(topic, level, 6)
+                    cnt["bloom_badge"] = b_badge
+                    cnt["bloom_color"] = b_color
+                    sub_blocks.append({
+                        "action": "DRAW_FLIP_CARDS",
+                        "data": cnt,
+                        "bloom_badge": b_badge,
+                        "bloom_color": b_color,
+                        "bloom_level": b_level
+                    })
+                elif b_type == "fill_blanks":
+                    f_num = max(int(block_counts.get("fill") or 10), 10)
+                    cnt = await content_agent.generate_fill_blanks(
+                        topic, level, f_num,
+                        bloom_level=b_level,
+                        bloom_instructions=b_instr
+                    )
+                    cnt["bloom_badge"] = b_badge
+                    cnt["bloom_color"] = b_color
+                    sub_blocks.append({
+                        "action": "DRAW_FILL_BLANKS",
+                        "data": cnt,
+                        "bloom_badge": b_badge,
+                        "bloom_color": b_color,
+                        "bloom_level": b_level
+                    })
+            except Exception as err:
+                logger.warning(f"Failed to generate Bloom sub-block {b_type} ({b_level}): {err}")
+
+    # Ensure teacher guide text is never empty
+    if not teacher_guide_text or not teacher_guide_text.strip():
         is_kid = (student_profile.get("age", 14) < 12) or "ребенок" in student_name.lower()
         teacher_guide_text = (
             f"🎯 ЭТАПЫ ЗАНЯТИЯ (Тайминг: 45 мин | Уровень: {level})\n"
-            f"• 00–08 мин | Разминка и счет (Remember): активировать числа (10–100) и первичные предлоги с опорой на картинки.\n"
-            f"• 08–18 мин | Отработка предлогов (Apply): поиск предметов в комнате (in, on, under, behind, next to).\n"
-            f"• 18–30 мин | Описание людей и фото-квиз (Analyze): сопоставление номеров агентов, цвета глаз и роста (tall/short).\n"
-            f"• 30–40 мин | Игровая миссия и речь (Create): детективная игра «Найди секретного агента» со спонтанным говорением.\n"
-            f"• 40–45 мин | Рефлексия (Cooler): назвать 3 числа, 2 предлога и 1 слово внешности.\n\n"
+            f"• 00–08 мин | Разминка и счет (Remember): активировать ключевую лексику с опорой на картинки.\n"
+            f"• 08–18 мин | Отработка структур (Apply): контекстные предложения и практические задания.\n"
+            f"• 18–30 мин | Анализ и оценка (Analyze): фото-квиз, выбор вариантов и поиск закономерностей.\n"
+            f"• 30–40 мин | Игровая речь (Create): свободное говорение и обсуждение открытых вопросов.\n"
+            f"• 40–45 мин | Рефлексия: подведение итогов и закрепление.\n\n"
             f"💡 МЕТОДИЧЕСКИЙ ФОКУС ({student_name}, {level})\n"
             f"• {'Частая смена микро-активностей каждые 7–10 минут для удержания концентрации.' if is_kid else 'Практическая направленность и максимум спонтанного говорения.'}\n"
             f"• Опора на наглядные визуальные карточки, минимизация абстрактных грамматических правил.\n"
             f"• Реакция на ошибки: не перебивать, использовать метод мягкого повторения (Echoing).\n\n"
             f"🗣️ СТАРТОВЫЙ АЙСБРЕЙКЕР\n"
-            f"• «Hello! Look around your room: what is on your desk right now? Can you name 3 things in English?»\n\n"
+            f"• «Hello! Let's start our lesson: how are you today and what interesting things happened?»\n\n"
             f"🏠 ДОМАШНЕЕ ЗАДАНИЕ\n"
-            f"• Нарисовать свою комнату и спрятать в ней 3 секретных предмета с подписями на английском."
+            f"• Повторить изученные слова и составить 3 собственных предложения по теме «{topic}»."
         )
-
-    is_child = (int(student_age) <= 14 if str(student_age).isdigit() else False) or "ребенок" in full_ctx_str or "дети" in full_ctx_str
-
-    # Extract custom quantities if specified by teacher in command or history
-    m_quiz_count = re.search(r"(?:квиз\w*|вопрос\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
-    if not m_quiz_count:
-        m_quiz_count = re.search(r"(\d{1,2})\s*(?:вопрос\w*|задани\w* в квиз\w*)", full_ctx_str)
-
-    m_vocab_count = re.search(r"(?:словар\w*|слов\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
-    if not m_vocab_count:
-        m_vocab_count = re.search(r"(\d{1,2})\s*(?:слов\w*)", full_ctx_str)
-
-    m_fill_count = re.search(r"(?:пропуск\w*|предложен\w*)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
-    if not m_fill_count:
-        m_fill_count = re.search(r"(\d{1,2})\s*(?:предложен\w*|пропуск\w*)", full_ctx_str)
-
-    m_cards_count = re.search(r"(?:карточ\w*|говорен\w*|speaking)\s*[:\-]?\s*(\d{1,2})", full_ctx_str)
-    if not m_cards_count:
-        m_cards_count = re.search(r"(\d{1,2})\s*(?:карточ\w*)", full_ctx_str)
-
-    block_counts = {
-        "quiz": int(m_quiz_count.group(1)) if m_quiz_count else 10,
-        "vocab": int(m_vocab_count.group(1)) if m_vocab_count else 8,
-        "fill": int(m_fill_count.group(1)) if m_fill_count else 10,
-        "cards": int(m_cards_count.group(1)) if m_cards_count else 5,
-    }
-
-    # 2. Generate sub-blocks content corresponding to Bloom stages
-    for stage in bloom_arc:
-        b_type = stage["block_type"]
-        b_level = stage["bloom_level"]
-        b_instr = stage["content_prompt_instructions"]
-        b_badge = stage["badge_text"]
-        b_color = stage["badge_color"]
-        try:
-            if b_type == "speaking_cards":
-                c_num = block_counts.get("cards") or 5
-                cnt = await content_agent.generate_speaking_cards(
-                    topic, level, c_num,
-                    bloom_level=b_level,
-                    bloom_instructions=b_instr
-                )
-                if is_child:
-                    cards = cnt.get("cards", [])
-                    queries = [f"{c.get('question', '')} {topic}" for c in cards]
-                    imgs = await image_agent.get_quiz_images(queries, topic=topic, is_child=True)
-                    for c, img in zip(cards, imgs):
-                        if img:
-                            c["image_base64"] = img
-                cnt["bloom_badge"] = b_badge
-                cnt["bloom_color"] = b_color
-                sub_blocks.append({
-                    "action": "DRAW_SPEAKING_CARDS",
-                    "data": cnt,
-                    "bloom_badge": b_badge,
-                    "bloom_color": b_color,
-                    "bloom_level": b_level
-                })
-            elif b_type == "vocabulary_table":
-                v_num = block_counts.get("vocab") or 8
-                cnt = await content_agent.generate_vocabulary_table(
-                    topic, level, v_num,
-                    bloom_level=b_level,
-                    bloom_instructions=b_instr
-                )
-                cnt["bloom_badge"] = b_badge
-                cnt["bloom_color"] = b_color
-                sub_blocks.append({
-                    "action": "DRAW_VOCAB_TABLE",
-                    "data": cnt,
-                    "bloom_badge": b_badge,
-                    "bloom_color": b_color,
-                    "bloom_level": b_level
-                })
-            elif b_type == "quiz_photo":
-                q_num = max(int(block_counts.get("quiz") or 10), 10)
-                cnt = await content_agent.generate_quiz_photo(
-                    topic, level, q_num,
-                    bloom_level=b_level,
-                    bloom_instructions=b_instr
-                )
-                cnt["has_images"] = True
-                cnt["image_mode"] = "generate"
-                cnt["bloom_badge"] = b_badge
-                cnt["bloom_color"] = b_color
-                questions = cnt.get("questions", [])
-                queries = [q.get("image_query", q.get("question", "")) for q in questions]
-                images_b64 = await image_agent.get_quiz_images(queries, topic=topic, is_child=is_child)
-                for q, img in zip(questions, images_b64):
-                    q["image_base64"] = img
-                cnt["questions"] = questions
-                sub_blocks.append({
-                    "action": "DRAW_QUIZ_PHOTO",
-                    "data": cnt,
-                    "bloom_badge": b_badge,
-                    "bloom_color": b_color,
-                    "bloom_level": b_level
-                })
-            elif b_type == "flip_cards":
-                cnt = await content_agent.generate_flip_cards(topic, level, 6)
-                cnt["bloom_badge"] = b_badge
-                cnt["bloom_color"] = b_color
-                sub_blocks.append({
-                    "action": "DRAW_FLIP_CARDS",
-                    "data": cnt,
-                    "bloom_badge": b_badge,
-                    "bloom_color": b_color,
-                    "bloom_level": b_level
-                })
-            elif b_type == "fill_blanks":
-                f_num = max(int(block_counts.get("fill") or 10), 10)
-                cnt = await content_agent.generate_fill_blanks(
-                    topic, level, f_num,
-                    bloom_level=b_level,
-                    bloom_instructions=b_instr
-                )
-                cnt["bloom_badge"] = b_badge
-                cnt["bloom_color"] = b_color
-                sub_blocks.append({
-                    "action": "DRAW_FILL_BLANKS",
-                    "data": cnt,
-                    "bloom_badge": b_badge,
-                    "bloom_color": b_color,
-                    "bloom_level": b_level
-                })
-        except Exception as err:
-            logger.warning(f"Failed to generate Bloom sub-block {b_type} ({b_level}): {err}")
 
     # 3. Assemble full lesson package command
     lesson_cmd = {

@@ -69,6 +69,27 @@ Return ONLY valid JSON adhering to this schema:
 """
 
 
+def optimize_image_for_vision(raw_bytes: bytes, max_dim: int = 1024, quality: int = 85) -> bytes:
+    """Downscales image to max_dim and compresses to JPEG to save LLM multimodal tokens while preserving OCR clarity."""
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(raw_bytes))
+        w, h = img.size
+        if max(w, h) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        compressed = buf.getvalue()
+        if len(compressed) < len(raw_bytes):
+            return compressed
+    except Exception as e:
+        logger.debug(f"Vision image optimization skipped: {e}")
+    return raw_bytes
+
+
 async def analyze_image(image_base64: str, command: str = "", level: str = "A2") -> dict:
     """
     Save image to cache, analyze it using multimodal AI, and produce structured pedagogical context.
@@ -86,11 +107,13 @@ async def analyze_image(image_base64: str, command: str = "", level: str = "A2")
     img_path = CACHE_DIR / img_filename
     try:
         raw_bytes = base64.b64decode(clean_b64)
+        vision_bytes = optimize_image_for_vision(raw_bytes, max_dim=1024, quality=85)
         with open(img_path, "wb") as f:
-            f.write(raw_bytes)
+            f.write(vision_bytes)
     except Exception as e:
         logger.error(f"Failed to save selected canvas image: {e}")
         return {}
+
 
     norm_path = str(img_path).replace("\\", "/")
 
@@ -219,17 +242,19 @@ async def analyze_batch_images(images: list[dict], command: str = "", level: str
             b64 = b64.split(",", 1)[1]
         try:
             raw_bytes = base64.b64decode(b64)
+            vision_bytes = optimize_image_for_vision(raw_bytes, max_dim=800, quality=80)
             img_name = f"batch_{ts}_{i}_{item.get('name', 'img')[:15].replace(' ', '_')}.jpg"
             img_path = CACHE_DIR / img_name
             with open(img_path, "wb") as f:
-                f.write(raw_bytes)
+                f.write(vision_bytes)
             saved_files.append({
                 "index": i,
                 "name": item.get("name") or f"Photo {i+1}",
                 "path": str(img_path).replace("\\", "/"),
-                "bytes": raw_bytes,
+                "bytes": vision_bytes,
                 "image_base64": b64
             })
+
         except Exception as e:
             logger.warning(f"Failed to decode batch image #{i}: {e}")
 
