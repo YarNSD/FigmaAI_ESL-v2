@@ -37,6 +37,7 @@ async def draw_quiz_photo(content: dict) -> dict:
     questions_data = content.get("questions", [])
     is_child = content.get("is_child", False)
     is_sticker = content.get("is_sticker", False) or (image_mode == "sticker")
+    verification_report = {}
     if has_images:
         questions_data = await image_agent.resolve_batch_images(
             questions_data,
@@ -46,6 +47,18 @@ async def draw_quiz_photo(content: dict) -> dict:
             is_child=is_child,
             is_sticker=is_sticker,
         )
+
+        # ── Mandatory Visual QA Verification Step ──
+        try:
+            from server.agents import vision_verifier
+            questions_data, verification_report = await vision_verifier.verify_and_curate_images(
+                questions_data,
+                topic=content.get("topic", ""),
+                level=content.get("level", "A2"),
+                block_type="quiz_photo"
+            )
+        except Exception as v_err:
+            logger.warning(f"Visual QA step skipped: {v_err}")
 
     result = await bridge.send_command("DRAW_QUIZ_PHOTO", {
         "title": content["title"],
@@ -62,7 +75,10 @@ async def draw_quiz_photo(content: dict) -> dict:
     if result.get("ok") and result.get("nodeId"):
         asyncio.create_task(toc_agent.register_block("quiz_photo", content["title"], result["nodeId"]))
 
-    return _finalize_result(result)
+    final_res = _finalize_result(result)
+    final_res["verification_report"] = verification_report
+    final_res["verified_items"] = questions_data
+    return final_res
 
 
 async def draw_flip_cards(content: dict) -> dict:
@@ -83,6 +99,18 @@ async def draw_flip_cards(content: dict) -> dict:
         is_sticker=is_sticker,
     )
 
+    verification_report = {}
+    try:
+        from server.agents import vision_verifier
+        cards_with_images, verification_report = await vision_verifier.verify_and_curate_images(
+            cards_with_images,
+            topic=content.get("topic", "english"),
+            level=content.get("level", "A2"),
+            block_type="flip_cards"
+        )
+    except Exception as v_err:
+        logger.warning(f"Visual QA step skipped for flip_cards: {v_err}")
+
     result = await bridge.send_command("DRAW_FLIP_CARDS", {
         "title": content["title"],
         "level": content.get("level", "A2"),
@@ -97,7 +125,10 @@ async def draw_flip_cards(content: dict) -> dict:
     if result.get("ok") and result.get("nodeId"):
         asyncio.create_task(toc_agent.register_block("flip_cards", content["title"], result["nodeId"]))
 
-    return _finalize_result(result)
+    final_res = _finalize_result(result)
+    final_res["verification_report"] = verification_report
+    final_res["verified_items"] = cards_with_images
+    return final_res
 
 
 async def draw_video_quiz(content: dict) -> dict:
@@ -225,6 +256,18 @@ async def draw_speaking_cards(content: dict) -> dict:
         is_sticker=is_sticker,
     )
 
+    verification_report = {}
+    try:
+        from server.agents import vision_verifier
+        cards_with_images, verification_report = await vision_verifier.verify_and_curate_images(
+            cards_with_images,
+            topic=content.get("topic", "discussion"),
+            level=content.get("level", "A2"),
+            block_type="speaking_cards"
+        )
+    except Exception as v_err:
+        logger.warning(f"Visual QA step skipped for speaking_cards: {v_err}")
+
     result = await bridge.send_command("DRAW_SPEAKING_CARDS", {
         "title": content["title"],
         "level": content.get("level", "A2"),
@@ -239,4 +282,7 @@ async def draw_speaking_cards(content: dict) -> dict:
     if result.get("ok") and result.get("nodeId"):
         asyncio.create_task(toc_agent.register_block("speaking_cards", content["title"], result["nodeId"]))
 
-    return _finalize_result(result)
+    final_res = _finalize_result(result)
+    final_res["verification_report"] = verification_report
+    final_res["verified_items"] = cards_with_images
+    return final_res

@@ -185,7 +185,7 @@ Return JSON in this EXACT format:
   "questions": [
     {{
       "id": 1,
-      "image_query": "2-4 word Wikipedia-searchable English noun phrase for this question's key concept. Must be a concrete THING or SCENE visible in a photo (e.g. 'yellow card football', 'cat sleeping sofa', 'library bookshelves'). NOT abstract words like 'grammar', 'verb', 'language'. Topic context MUST be included.",
+      "image_query": "Action-oriented visual scene description (subject + specific action verb + setting, e.g. 'two puppies running fast green grass', 'chef chopping fresh vegetables kitchen', 'girl sleeping cozy sofa'). If the sentence or question is about an ACTION or dynamic movement (e.g. running, jumping, cooking, sleeping, dancing), the action MUST be clearly emphasized in the query. Always specify plural if subject is plural ('two puppies', 'children playing'). NEVER use just a flat static noun like 'puppy'.",
       "sentence": "Sentence with ___ gap OR question text",
       "options": {opts_example_str},
       "correct_index": 0,
@@ -200,7 +200,7 @@ CRITICAL RULES FOR OPTIONS:
 1. Every question MUST have EXACTLY {opt_cnt} options ({", ".join(example_opts)}).
 2. Do NOT include 'A)', 'B)', 'C)', 'D)' prefixes in the options array — only the text.
 3. RANDOMIZE the correct answer index across questions (e.g. questions have correct_index = 0, 1, 2... in random order). NEVER make option 1 / index 0 always the correct answer!
-4. Each image_query must be a specific, concrete, photo-searchable English phrase related to BOTH the question AND the topic '{topic}'.
+4. Each image_query MUST depict the SPECIFIC ACTION and SUBJECT of the question (e.g. 'two puppies running fast grass', NOT just 'puppy'). Stationary photos for action questions will fail visual QA!
 5. NEVER generate robotic fillers like 'None of the above', 'All of the above', or 'Not mentioned'. All options must be authentic, plausible English words or phrases."""
 
     if not (config.is_ai_ready() and ai_engine.is_antigravity_cli_authenticated()):
@@ -699,7 +699,7 @@ Generate a SINGLE cohesive JSON with:
     "level": "{level}",
     "instruction": "👉 Выберите один правильный вариант ответа для каждого вопроса",
     "questions": [
-      {{"id": 1, "sentence": "Question or sentence with ___", "options": ["opt1", "opt2", "opt3", "opt4"], "correct_index": 0, "image_query": "English photo search phrase", "explanation": "Why correct"}}
+      {{"id": 1, "sentence": "Question or sentence with ___", "options": ["opt1", "opt2", "opt3", "opt4"], "correct_index": 0, "image_query": "Action-oriented visual scene (subject + action verb + setting, e.g. 'two puppies running fast grass')", "explanation": "Why correct"}}
     ]
   }},
   "fill_blanks": {{

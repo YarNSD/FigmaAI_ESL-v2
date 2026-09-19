@@ -101,7 +101,7 @@ CHAT_SYSTEM_PROMPT = """Ты — умный, живой, проницатель�
         - A) Вариант 1 (✅)  <-- правильный ответ ОБЯЗАТЕЛЬНО помечается галочкой (✅)
         - B) Вариант 2
         - C) Вариант 3
-        (Картинка: [красочное описание иллюстрации на русском или английском])
+        (Картинка: [динамичное описание сцены с обязательным указанием ДЕЙСТВИЯ, субъекта и обстановки, например: 'два щенка быстро бегут по траве', а не просто 'щенок'])
      2. 🐘 ...
      В конце ответа ОБЯЗАТЕЛЬНО теплое приглашение:
      «Если всё нравится — напиши **«Делай»** (или нажми кнопку ниже), и я перенесу всё в Figma! Если хочешь что-то поменять (например, заменить вопрос или изменить варианты) — просто скажи!»
@@ -169,6 +169,32 @@ def is_content_valid_for_block_type(btype: str, content: Any) -> bool:
     elif btype == "video_quiz":
         return len(content.get("questions", [])) >= 2
     return True
+
+
+def _enrich_image_query(raw_query: str, sentence: str, topic: str) -> str:
+    """Enrich image query with dynamic action verbs and clean subjects from question."""
+    action_words = [
+        "running", "jumping", "swimming", "flying", "climbing", "dancing",
+        "cooking", "baking", "sleeping", "eating", "drinking", "playing",
+        "riding", "driving", "singing", "crying", "laughing", "painting"
+    ]
+    query = raw_query.strip() if raw_query else ""
+    sentence_lower = sentence.lower() if sentence else ""
+
+    # If query is missing or generic (e.g. just topic or empty), extract clean phrase from sentence
+    if not query or query.lower() in ("image", "photo", "picture", topic.lower()):
+        # Clean question from gap markers
+        clean_s = re.sub(r"___+|\[.*?\]|\(.*?\)", "", sentence)
+        clean_s = re.sub(r"^(Look at the|What is|Where is|Which of|Choose the)\s*", "", clean_s, flags=re.IGNORECASE)
+        query = clean_s.strip("?.! ")[:45]
+
+    # Check if sentence has an action verb that query missed
+    for act in action_words:
+        if act in sentence_lower and act not in query.lower():
+            query = f"{query} {act}".strip()
+            break
+
+    return query or topic or "english education"
 
 
 def normalize_draft_content(
@@ -373,7 +399,11 @@ def normalize_draft_content(
                         c_idx = int(c_idx)
                     except (ValueError, TypeError):
                         c_idx = 0
-                    img = str(item.get("image_query") or item.get("image") or f"{top} {sentence[:30]}").strip()
+                    img = _enrich_image_query(
+                        str(item.get("image_query") or item.get("image") or "").strip(),
+                        sentence=sentence,
+                        topic=top
+                    )
                     expl = str(item.get("explanation") or (f"Correct answer is {opts[c_idx]}" if (opts and 0 <= c_idx < len(opts)) else "")).strip()
 
                     if len(opts) >= 2:

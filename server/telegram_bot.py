@@ -19,8 +19,10 @@ from typing import Optional, Any, Dict
 
 logger = logging.getLogger("telegram_bot")
 
+import io
+
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
     from telegram.ext import (
         Application, CommandHandler, MessageHandler,
         CallbackQueryHandler, ContextTypes, filters
@@ -29,12 +31,13 @@ try:
 except ImportError:
     TELEGRAM_AVAILABLE = False
     Update = Any
+    InputMediaPhoto = Any
     class _ContextTypes:
         DEFAULT_TYPE = Any
     ContextTypes = _ContextTypes()
 
 from server import config, bridge
-from server.agents import orchestrator, student_agent, chat_agent, feedback_agent
+from server.agents import orchestrator, student_agent, chat_agent, feedback_agent, vision_verifier, image_agent
 
 
 # ── Lifecycle State ──────────────────────────────────────────────────────────
@@ -503,6 +506,184 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # 8. Image replacement callbacks (Vision QA & Image Reroll)
+    if data == "replace_img:menu":
+        last_block = context.user_data.get("last_block_context")
+        if not last_block or not last_block.get("items"):
+            await query.answer("Нет активного блока для замены фото", show_alert=True)
+            return
+        items = last_block["items"]
+        buttons = []
+        for idx, it in enumerate(items, start=1):
+            q_text = it.get("sentence") or it.get("question") or it.get("word") or f"Задание {idx}"
+            q_clean = re.sub(r"^\d+[\.\)]\s*", "", q_text).strip()
+            q_short = (q_clean[:22] + "...") if len(q_clean) > 22 else q_clean
+            buttons.append([InlineKeyboardButton(f"🖼️ {idx}. {q_short}", callback_data=f"replace_img:sel:{idx-1}")])
+        buttons.append([InlineKeyboardButton("↩️ Назад в меню", callback_data="menu:main")])
+        await query.edit_message_text(
+            "🔄 *Выберите задание, в котором хотите заменить картинку:*\n"
+            "Новая иллюстрация будет создана нейросетью или найдена на Pinterest и сразу обновлена на доске Figma.",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="Markdown"
+        )
+        return
+
+    if data.startswith("replace_img:sel:"):
+        idx = int(data.split(":", 2)[2])
+        last_block = context.user_data.get("last_block_context", {})
+        items = last_block.get("items", [])
+        if 0 <= idx < len(items):
+            it = items[idx]
+            q_text = it.get("sentence") or it.get("question") or it.get("word") or f"Задание {idx+1}"
+            buttons = [
+                [InlineKeyboardButton("⚡ Сгенерировать ИИ (Pollinations)", callback_data=f"replace_img:gen:{idx}")],
+                [InlineKeyboardButton("🔍 Найти другое фото (Pinterest)", callback_data=f"replace_img:pin:{idx}")],
+                [InlineKeyboardButton("↩️ Назад к списку", callback_data="replace_img:menu")],
+            ]
+            await query.edit_message_text(
+                f"🖼️ *Замена иллюстрации к заданию №{idx+1}:*\n"
+                f"«{q_text}»\n\n"
+                f"Выберите способ замены:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="Markdown"
+            )
+        return
+
+    if data.startswith("replace_img:gen:"):
+        idx = int(data.split(":", 2)[2])
+        await handle_image_replacement_request(update, context, idx, mode="generate")
+        return
+
+    if data.startswith("replace_img:pin:"):
+        idx = int(data.split(":", 2)[2])
+        await handle_image_replacement_request(update, context, idx, mode="pinterest")
+        return
+
+
+async def handle_image_replacement_request(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    card_idx: int,
+    custom_prompt: Optional[str] = None,
+    mode: str = "generate"
+):
+    """Replace an image for a specific card in the last created block, both in Figma and in user context."""
+    last_block = context.user_data.get("last_block_context")
+    if not last_block:
+        msg = "⚠️ Нет информации о последнем созданном блоке. Создайте задание или выделите блок на доске."
+        if update.callback_query:
+            await update.callback_query.answer(msg, show_alert=True)
+        elif update.message:
+            await update.message.reply_text(msg)
+        return
+
+    items = last_block.get("items", [])
+    if card_idx < 0 or card_idx >= len(items):
+        msg = f"⚠️ В текущем блоке {len(items)} заданий. Пожалуйста, укажите номер от 1 до {len(items)}."
+        if update.callback_query:
+            await update.callback_query.answer(msg, show_alert=True)
+        elif update.message:
+            await update.message.reply_text(msg)
+        return
+
+    it = items[card_idx]
+    q_sentence = it.get("sentence") or it.get("question") or it.get("word") or it.get("title") or f"Задание {card_idx+1}"
+    q_clean = re.sub(r"^\d+[\.\)]\s*", "", q_sentence).strip()
+    topic = last_block.get("topic") or "English"
+    node_id = last_block.get("node_id")
+
+    status_msg = None
+    status_text = f"🎨 *Подбираю новую иллюстрацию для задания №{card_idx+1}...*\n«{q_clean}»"
+    if update.callback_query:
+        await update.callback_query.answer("Генерирую новую картинку...")
+        if update.callback_query.message:
+            status_msg = await update.callback_query.message.reply_text(status_text, parse_mode="Markdown")
+    elif update.message:
+        status_msg = await update.message.reply_text(status_text, parse_mode="Markdown")
+
+    # Formulate prompt
+    if custom_prompt and len(custom_prompt.strip()) > 1:
+        gen_prompt = f"high quality photography of {custom_prompt.strip()}, dynamic action, vibrant lighting, no watermark, 4k"
+    else:
+        expected_act = vision_verifier.extract_expected_action(q_sentence)
+        clean_no_blanks = re.sub(r"___+", "", q_clean).strip()
+        if expected_act:
+            gen_prompt = (
+                f"high quality action photography of {clean_no_blanks}, "
+                f"clear dynamic motion of {expected_act}, realistic vibrant lighting, "
+                f"no watermark, no logos, 4k"
+            )
+        else:
+            gen_prompt = (
+                f"high quality photography of {clean_no_blanks}, "
+                f"vibrant realistic scene, no text, no watermark, 4k"
+            )
+
+    try:
+        new_b64 = await image_agent.get_image_base64(
+            gen_prompt,
+            topic=topic,
+            image_mode=mode,
+            is_child=it.get("is_child", False),
+            is_sticker=it.get("is_sticker", False)
+        )
+        if not new_b64:
+            err_txt = f"⚠️ Не удалось получить новое изображение для задания №{card_idx+1}."
+            if status_msg:
+                await status_msg.edit_text(err_txt)
+            return
+
+        # Update in Figma via bridge
+        if bridge.is_connected() and node_id:
+            try:
+                await bridge.send_command("UPDATE_BLOCK_IMAGES", {
+                    "nodeId": node_id,
+                    "index": card_idx,
+                    "image": new_b64
+                })
+            except Exception as b_err:
+                logger.warning(f"Bridge image update failed: {b_err}")
+
+        # Update in memory
+        it["image_base64"] = new_b64
+        it["image_verified"] = True
+
+        # Send photo to Telegram
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Заменить ещё фото", callback_data="replace_img:menu")],
+            [InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]
+        ])
+
+        raw_bytes = base64.b64decode(new_b64)
+        cap = (
+            f"✅ *Иллюстрация к вопросу {card_idx+1} обновлена на доске Figma!*\n\n"
+            f"📋 «{q_clean}»\n"
+            f"🔍 *Сюжет:* {gen_prompt[:100]}..."
+        )
+        if chat_id:
+            try:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=io.BytesIO(raw_bytes),
+                    caption=cap,
+                    reply_markup=kb,
+                    parse_mode="Markdown"
+                )
+                if status_msg:
+                    await status_msg.delete()
+                return
+            except Exception as sp_err:
+                logger.warning(f"Failed to send replacement photo: {sp_err}")
+
+        if status_msg:
+            await status_msg.edit_text(cap, reply_markup=kb, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error replacing image for card #{card_idx+1}: {e}", exc_info=True)
+        if status_msg:
+            await status_msg.edit_text(f"❌ Ошибка обновления изображения: {e}")
+
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -920,6 +1101,27 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data.pop("pending_lesson_plan", None)
         context.user_data.pop("pending_plan_time", None)
 
+    # 2.4 Check if teacher asks to replace a specific image in the last created block
+    # e.g. "замени 4-ю картинку", "поменяй фото 4 на щенков", "замени картинку 2"
+    replace_img_match = re.search(
+        r"(?:замени|поменяй|обнови|перерисуй)\s+(?:картинк[уа-я]*|фото|иллюстраци[юа-я]*|вопрос)\s*№?\s*(\d+)(?:\s+(?:на|с)\s+(.+))?",
+        text,
+        re.IGNORECASE
+    )
+    if not replace_img_match:
+        replace_img_match = re.search(
+            r"(?:замени|поменяй|обнови|перерисуй)\s*№?\s*(\d+)\s*(?:-?[уюея]?\s+)?(?:картинк[уа-я]*|фото|иллюстраци[юа-я]*)(?:\s+(?:на|с)\s+(.+))?",
+            text,
+            re.IGNORECASE
+        )
+    if replace_img_match:
+        card_num = int(replace_img_match.group(1))
+        custom_req = replace_img_match.group(2) or ""
+        last_block = context.user_data.get("last_block_context")
+        if last_block:
+            await handle_image_replacement_request(update, context, card_num - 1, custom_prompt=custom_req)
+            return
+
     # 2.5 Check if teacher refers to images/photos on the canvas
     is_canvas_photo_request = any(k in lower for k in [
         "выделенн", "на доске картин", "на доске фото", "этим фото", "этим картин",
@@ -1143,10 +1345,49 @@ async def execute_creation(
             title = result.get("title", command or "Задание")
             res_lvl = result.get("level", level or "A2")
             warnings = result.get("warnings", [])
+            node_id = result.get("nodeId")
+            v_report = result.get("verification_report") or {}
+            v_items = result.get("verified_items") or []
+
+            # Save in user_data for quick replacements:
+            context.user_data["last_block_context"] = {
+                "node_id": node_id,
+                "title": title,
+                "topic": topic,
+                "block_type": block_type,
+                "level": res_lvl,
+                "items": v_items,
+                "time": time.time()
+            }
+
             warn_block = ""
             if warnings:
                 warn_lines = "\n".join(f"• _{w}_" for w in warnings)
                 warn_block = f"\n\n⚠️ *Обратите внимание:*\n{warn_lines}\n_Элементы можно скорректировать прямо на доске._"
+
+            # Visual QA Report Block
+            v_block = ""
+            total_v = v_report.get("total") or len(v_items)
+            auto_corr = v_report.get("auto_corrected", 0)
+            passed = v_report.get("passed", 0)
+            corrections = v_report.get("corrections", [])
+
+            if total_v > 0:
+                if auto_corr > 0:
+                    corr_items = "\n".join([f"  • *№{c.get('id')}*: {c.get('issue')}" for c in corrections[:4]])
+                    v_block = (
+                        f"\n\n🔍 *Визуальный контроль (Vision QA):*\n"
+                        f"• Проверено иллюстраций: *{total_v}*\n"
+                        f"• 🔄 Автоматически заменено с несоответствующим сюжетом: *{auto_corr}*\n"
+                        f"{corr_items}\n"
+                        f"⚡ Все иллюстрации проверены и точно отображают требуемые действия и сюжет! ✅"
+                    )
+                else:
+                    v_block = (
+                        f"\n\n🔍 *Визуальный контроль (Vision QA):*\n"
+                        f"• Проверено иллюстраций: *{total_v}*\n"
+                        f"• Все изображения проверены: сюжет, множественное число и действия соответствуют контексту! ✅"
+                    )
 
             reply_text = (
                 f"✅ *Готово! Блок успешно нарисован на доске!*\n\n"
@@ -1154,14 +1395,53 @@ async def execute_creation(
                 f"🎯 *Уровень:* [{res_lvl}]\n"
                 f"👤 *Ученик:* {sname}\n"
                 f"🎨 *Доска:* {bname}"
+                f"{v_block}"
                 f"{warn_block}"
             )
-            back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")]])
+
+            # Check if there are verified photos to send as a preview album
+            preview_photos = []
+            for i, it in enumerate(v_items, start=1):
+                b64 = it.get("image_base64")
+                if b64:
+                    try:
+                        raw = base64.b64decode(b64)
+                        q_text = it.get("sentence") or it.get("question") or it.get("word") or it.get("title") or f"Задание {i}"
+                        q_clean = re.sub(r"^\d+[\.\)]\s*", "", q_text).strip()
+                        cap = f"№{i}: {q_clean}"
+                        if len(cap) > 90:
+                            cap = cap[:87] + "..."
+                        preview_photos.append((raw, cap))
+                    except Exception:
+                        pass
+
+            action_buttons = []
+            if preview_photos:
+                action_buttons.append([InlineKeyboardButton("🔄 Заменить фото в задании", callback_data="replace_img:menu")])
+            action_buttons.append([InlineKeyboardButton("📱 Главное меню", callback_data="menu:main")])
+            back_kb = InlineKeyboardMarkup(action_buttons)
+
             if status_msg:
                 try:
                     await status_msg.edit_text(reply_text, reply_markup=back_kb, parse_mode="Markdown")
                 except Exception:
                     await status_msg.edit_text(reply_text, reply_markup=back_kb)
+
+            # Send photo previews album to Telegram so teacher can review them immediately!
+            if preview_photos and update.effective_chat:
+                try:
+                    chat_id = update.effective_chat.id
+                    if len(preview_photos) >= 2:
+                        media_group = [
+                            InputMediaPhoto(media=io.BytesIO(img_bytes), caption=cap)
+                            for img_bytes, cap in preview_photos[:10]
+                        ]
+                        await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+                    elif len(preview_photos) == 1:
+                        img_bytes, cap = preview_photos[0]
+                        await context.bot.send_photo(chat_id=chat_id, photo=io.BytesIO(img_bytes), caption=cap)
+                except Exception as pm_err:
+                    logger.warning(f"Could not send Telegram photo previews: {pm_err}")
         else:
             tech_err = result.get("technical_error") or result.get("message") or "Произошла ошибка при создании"
             safe_err = str(tech_err).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")

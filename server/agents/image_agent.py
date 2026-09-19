@@ -61,16 +61,21 @@ def _detect_proxy() -> str | None:
 
 
 def _clean_query(raw_query: str, topic: str = "") -> str:
-    """Clean and optimize query for image search."""
+    """Clean and optimize query for image search and generation."""
     if not raw_query:
         return topic or "english education"
-    
+
     clean = raw_query.strip()
-    # Remove common quiz boilerplates
+    # Strip fill-in-the-blank gaps (e.g. ___, _____, [gap], etc.)
+    clean = re.sub(r"___+|\[.*?\]|\(.*?\)", "", clean)
+    # Remove common quiz boilerplates and question prefixes
     clean = re.sub(r"^(photo of|picture of|an? |the |illustration of|image of)\s*", "", clean, flags=re.IGNORECASE)
-    clean = re.sub(r"^(which of the following|what is|what do you|where is|sentence with|gap|choose the)\s*", "", clean, flags=re.IGNORECASE)
-    # Strip trailing punctuation or question marks
+    clean = re.sub(r"^(which of the following|what is|what do you|where is|sentence with|gap|choose the|look at the|find the)\s*", "", clean, flags=re.IGNORECASE)
+    # Strip trailing punctuation, question marks, or exclamation marks
     clean = clean.strip("?.:;! \t\n")
+    # Clean multiple spaces
+    clean = re.sub(r"\s+", " ", clean).strip()
+
     # If topic is not in query, add topic context only if query is too generic (1 word)
     if topic and topic.lower() not in clean.lower() and len(clean.split()) < 2:
         clean = f"{clean} {topic}"
@@ -426,11 +431,24 @@ async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto"
                     if not raw_bytes:
                         raw_bytes = await _search_pinterest(cleaned, client, is_sticker=True)
                 else:
-                    logger.info(f"✨ ImageAgent [AUTO mode]: searching Pinterest for '{cleaned}'")
-                    raw_bytes = await _search_pinterest(cleaned, client, is_sticker=False)
-                    if not raw_bytes:
-                        logger.info(f"Pinterest empty for '{cleaned}', generating via Pollinations AI")
+                    # Check if query contains strong dynamic action verbs
+                    has_dynamic_action = any(
+                        act in cleaned.lower()
+                        for act in ["running", "jumping", "swimming", "flying", "dancing", "cooking", "sleeping", "eating", "climbing", "racing", "chasing", "baking", "playing", "riding", "driving"]
+                    )
+                    if has_dynamic_action:
+                        logger.info(f"✨ ImageAgent [AUTO mode - ACTION detected]: generating AI illustration for dynamic scene '{cleaned}'")
                         raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=False)
+                        if not raw_bytes:
+                            logger.info(f"AI generation unavailable for '{cleaned}', searching Pinterest with action keywords")
+                            raw_bytes = await _search_pinterest(f"{cleaned} action dynamic motion", client, is_sticker=False)
+                    else:
+                        logger.info(f"✨ ImageAgent [AUTO mode]: searching Pinterest for '{cleaned}'")
+                        raw_bytes = await _search_pinterest(cleaned, client, is_sticker=False)
+                        if not raw_bytes:
+                            logger.info(f"Pinterest empty for '{cleaned}', generating via Pollinations AI")
+                            raw_bytes = await _generate_pollinations(cleaned, client, topic=topic, is_child=is_child, is_sticker=False)
+
                     if not raw_bytes:
                         raw_bytes = await _search_wikimedia(cleaned, client)
                     if not raw_bytes:

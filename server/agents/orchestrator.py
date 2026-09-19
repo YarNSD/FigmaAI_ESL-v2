@@ -1141,4 +1141,6 @@ async def process_command(
         "level": lv,
         "warnings": list(dict.fromkeys(warnings)),
         "node_info": v_info,
+        "verification_report": draw_result.get("verification_report"),
+        "verified_items": draw_result.get("verified_items"),
     }

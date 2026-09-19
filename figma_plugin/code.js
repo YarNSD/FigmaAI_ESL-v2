@@ -2554,6 +2554,7 @@ async function drawESLQuizPhoto(params) {
     const imgFrameH = cardH - 40;
     if (hasImages) {
       const imgFrame = _eslMakeRect(qX + 20, qY + 20, Q_IMG_W, imgFrameH, '#f8fafc', 14);
+      imgFrame.name = 'Photo ' + (idx + 1);
       nodes.push(imgFrame);
 
       let imgLoaded = false;
@@ -4697,7 +4698,7 @@ async function handleCommand(cmd) {
       // ═══════════════════════════════════════════════════════
 
       case "UPDATE_BLOCK_IMAGES": {
-        const { nodeId, images = [] } = cmd.params || {};
+        const { nodeId, images = [], index, image } = cmd.params || {};
         let target = nodeId ? figma.getNodeById(nodeId) : null;
         if (!target && figma.currentPage.selection.length > 0) {
           target = figma.currentPage.selection[0];
@@ -4719,16 +4720,34 @@ async function handleCommand(cmd) {
         }
         findImgs(target);
 
+        // Sort image frames visually: top-to-bottom, left-to-right
+        imgNodes.sort((a, b) => {
+          if (Math.abs(a.y - b.y) > 20) return a.y - b.y;
+          return a.x - b.x;
+        });
+
         let updatedCount = 0;
-        for (let i = 0; i < imgNodes.length && i < images.length; i++) {
-          const b64 = images[i];
-          if (!b64) continue;
-          try {
-            const bytes = base64ToUint8Array(b64);
-            const img = figma.createImage(bytes);
-            imgNodes[i].fills = [{ type: "IMAGE", imageHash: img.hash, scaleMode: "FILL" }];
-            updatedCount++;
-          } catch (e) { }
+        if (typeof index === "number" && (image || (images && images[index]))) {
+          const singleB64 = image || images[index];
+          if (index >= 0 && index < imgNodes.length && singleB64) {
+            try {
+              const bytes = base64ToUint8Array(singleB64);
+              const img = figma.createImage(bytes);
+              imgNodes[index].fills = [{ type: "IMAGE", imageHash: img.hash, scaleMode: "FIT" }];
+              updatedCount++;
+            } catch (e) { }
+          }
+        } else {
+          for (let i = 0; i < imgNodes.length && i < images.length; i++) {
+            const b64 = images[i];
+            if (!b64) continue;
+            try {
+              const bytes = base64ToUint8Array(b64);
+              const img = figma.createImage(bytes);
+              imgNodes[i].fills = [{ type: "IMAGE", imageHash: img.hash, scaleMode: "FIT" }];
+              updatedCount++;
+            } catch (e) { }
+          }
         }
         figma.notify(`🖼️ Обновлено ${updatedCount} изображений в блоке!`, { timeout: 2500 });
         return { ok: true, success: true, updatedCount };
