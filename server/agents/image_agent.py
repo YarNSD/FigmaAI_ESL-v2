@@ -20,6 +20,10 @@ from server import agent_logger
 
 logger = logging.getLogger("image_agent")
 
+# Disk cache directory
+CACHE_DIR = Path(__file__).parent.parent / ".cache" / "images"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 # Cache query -> base64 string
 _IMAGE_CACHE: dict[str, str] = {}
 
@@ -39,9 +43,10 @@ def get_and_clear_warnings() -> list[str]:
     _LAST_BATCH_WARNINGS = []
     return w
 
-# Rate limit semaphore for generative AI endpoints (Pollinations)
+# Rate limit semaphore and cooldown for generative AI endpoints (Pollinations)
 _POLLINATIONS_SEMAPHORE = asyncio.Semaphore(1)
 _LAST_POLLINATIONS_TIME = 0.0
+_POLLINATIONS_COOLDOWN_UNTIL = 0.0
 
 # User-Agent for Wikipedia API compliance
 HEADERS = {
@@ -328,26 +333,31 @@ async def _generate_pollinations(
     # Use standard Pollinations endpoint without 'turbo' to avoid HTTP 429 rate limits
     url = f"https://image.pollinations.ai/prompt/{encoded}?width=400&height=260&nologo=true&seed={seed}"
 
+    global _LAST_POLLINATIONS_TIME, _POLLINATIONS_COOLDOWN_UNTIL
+
     async with _POLLINATIONS_SEMAPHORE:
         loop = asyncio.get_event_loop()
         now = loop.time()
+        if now < _POLLINATIONS_COOLDOWN_UNTIL:
+            logger.debug(f"Pollinations on cooldown ({_POLLINATIONS_COOLDOWN_UNTIL - now:.1f}s left), smoothly switching to photo search")
+            return None
+
         elapsed = now - _LAST_POLLINATIONS_TIME
-        if elapsed < 1.0:
-            await asyncio.sleep(1.0 - elapsed)
+        if elapsed < 1.2:
+            await asyncio.sleep(1.2 - elapsed)
 
         try:
-            resp = await client.get(url, timeout=7.0)
+            resp = await client.get(url, timeout=15.0)
             if resp.status_code == 200 and len(resp.content) > 3000:
                 logger.info(f"🎨 ImageAgent: AI-generated sticker/illustration for '{query}' ({len(resp.content):,} bytes)")
                 return resp.content
             elif resp.status_code == 429:
-                logger.warning(f"Pollinations 429 for '{query}' — immediately falling back to search")
-                add_warning("Сервис AI-генерации картинок временно перегружен (лимит 429), иллюстрации подобраны через поиск фото.")
+                _POLLINATIONS_COOLDOWN_UNTIL = loop.time() + 45.0
+                logger.warning(f"Pollinations rate-limit (429) for '{query}' — cooldown 45s, smoothly falling back to photo search")
             else:
                 logger.warning(f"Pollinations HTTP {resp.status_code} for '{query}'")
         except Exception as e:
             logger.warning(f"Pollinations failed/timed out for '{query}': {e}")
-            add_warning("Служба AI-генерации картинок не ответила вовремя, задействован резервный поиск фото.")
         finally:
             _LAST_POLLINATIONS_TIME = loop.time()
     return None
@@ -385,6 +395,18 @@ async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto"
     cache_key = f"{image_mode}:{is_child}:{is_sticker}:{cleaned}"
     if cache_key in _IMAGE_CACHE:
         return _IMAGE_CACHE[cache_key]
+
+    import hashlib
+    h = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
+    disk_file = CACHE_DIR / f"{h}.b64"
+    if disk_file.exists():
+        try:
+            cached_b64 = disk_file.read_text(encoding="utf-8").strip()
+            if cached_b64 and len(cached_b64) > 100:
+                _IMAGE_CACHE[cache_key] = cached_b64
+                return cached_b64
+        except Exception:
+            pass
 
     proxy = _detect_proxy()
     transport_kwargs = {"proxy": proxy} if proxy else {}
@@ -477,6 +499,10 @@ async def get_image_base64(query: str, topic: str = "", image_mode: str = "auto"
 
         b64_str = base64.b64encode(raw_bytes).decode("ascii")
         _IMAGE_CACHE[cache_key] = b64_str
+        try:
+            disk_file.write_text(b64_str, encoding="utf-8")
+        except Exception:
+            pass
         return b64_str
 
     return ""
